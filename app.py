@@ -5,19 +5,19 @@ from scipy.stats import linregress
 import matplotlib.pyplot as plt
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 import io
 from datetime import datetime
 
 st.set_page_config(
-    page_title="LIMS AI - Informe con Curva Analítica",
+    page_title="LIMS AI - Sistema de Control y Calibración Analítica",
     page_icon="🔬",
     layout="wide"
 )
 
-st.title("🔬 LIMS AI - Generación de Informes con Curva de Calibración")
-st.caption("Cuantificación Gráfica, Regresión Lineal e Inserción Automática en Certificados PDF")
+st.title("🔬 LIMS AI - Control de Calidad y Generación de Informes")
+st.caption("Gestión de Fichas Técnicas, Curvas de Calibración Cuantitativas e Informes con Gráficos Integrados")
 
 # --- ESTADOS DE SESIÓN ---
 if 'base_maestro' not in st.session_state:
@@ -39,6 +39,15 @@ if 'base_maestro' not in st.session_state:
             "Especificacion_Min": 25.0,
             "Especificacion_Max": 25.3,
             "Unidad": "%"
+        },
+        {
+            "ID_Elemento": "CU-003",
+            "Producto": "Sulfato de Cobre Pentahidratado",
+            "Parametro": "pH (5% en agua)",
+            "Tecnica": "Potenciometria",
+            "Especificacion_Min": 3.5,
+            "Especificacion_Max": 4.5,
+            "Unidad": "pH"
         },
         {
             "ID_Elemento": "CU-005",
@@ -63,25 +72,47 @@ if 'base_maestro' not in st.session_state:
 if 'aprobados' not in st.session_state:
     st.session_state.aprobados = {}
 
-# --- PESTAÑAS ---
-tab_curva, tab_historial = st.tabs([
-    "📈 1. Cuantificación y Curva de Calibración",
-    "📜 2. Certificados e Informes PDF"
+# --- PESTAÑAS DEL SISTEMA ---
+tab_maestro, tab_curva, tab_carga, tab_historial = st.tabs([
+    "📂 1. Cargar Base Maestro (FT)",
+    "📈 2. Curva de Calibración y Gráfica",
+    "📤 3. Carga Lote Completo",
+    "📜 4. Certificados Emitidos"
 ])
 
 # =========================================================
-# TAB 1: CUANTIFICACIÓN Y GENERACIÓN DE INFORME
+# TAB 1: CARGAR BASE MAESTRO
+# =========================================================
+with tab_maestro:
+    st.subheader("⚙️ Carga de Base de Datos Maestro (Fichas Técnicas)")
+    st.markdown("Suba el archivo Excel o CSV con la especificación de sus productos para alimentar las evaluaciones.")
+
+    archivo_maestro_upload = st.file_uploader("Cargar Base Maestro (.xlsx / .csv):", type=["xlsx", "csv"], key="uploader_maestro_main")
+
+    if archivo_maestro_upload is not None:
+        try:
+            df_temp = pd.read_csv(archivo_maestro_upload) if archivo_maestro_upload.name.endswith('.csv') else pd.read_excel(archivo_maestro_upload)
+            st.session_state.base_maestro = df_temp
+            st.success("✅ Base Maestro cargada exitosamente y lista para usar.")
+        except Exception as e:
+            st.error(f"Error al leer el archivo: {e}")
+
+    st.markdown("#### Vista Previa de la Base de Datos Activa:")
+    st.dataframe(st.session_state.base_maestro, use_container_width=True)
+
+# =========================================================
+# TAB 2: CUANTIFICACIÓN Y CURVA DE CALIBRACIÓN
 # =========================================================
 with tab_curva:
     st.subheader("📊 Módulo de Calibración y Liberación Analítica")
     
     col_c1, col_c2, col_c3 = st.columns(3)
     with col_c1:
-        param_cuant = st.selectbox("Parámetro a Analizar:", st.session_state.base_maestro['Parametro'].unique())
+        param_cuant = st.selectbox("Parámetro a Analizar:", st.session_state.base_maestro['Parametro'].unique(), key="sb_param")
     with col_c2:
-        lote_cuant = st.text_input("Número de Lote:", value=f"SULF-2026-01")
+        lote_cuant = st.text_input("Número de Lote:", value=f"SULF-2026-01", key="ti_lote")
     with col_c3:
-        analista_nombre = st.text_input("Analista Responsable:", value="Q.F.B. Analista QC")
+        analista_nombre = st.text_input("Analista Responsable:", value="Q.F.B. Analista QC", key="ti_analista")
 
     row_param = st.session_state.base_maestro[st.session_state.base_maestro['Parametro'] == param_cuant].iloc[0]
 
@@ -118,7 +149,7 @@ with tab_curva:
         spec_max = float(row_param['Especificacion_Max'])
         dictamen = "CUMPLE" if spec_min <= conc_muestra <= spec_max else "OOS (DESVÍO)"
 
-        # 3. Generar Gráfica Matplotlib en Memoria
+        # 3. Generar Gráfica Matplotlib
         fig, ax = plt.subplots(figsize=(6, 3.2), dpi=200)
         ax.scatter(x, y, color='#1E40AF', label='Patrones (STD)', s=40)
         
@@ -140,31 +171,34 @@ with tab_curva:
         img_buffer.seek(0)
         plt.close()
 
-        # 4. Construcción del PDF con ReportLab
+        # 4. Construcción del PDF
         pdf_buffer = io.BytesIO()
         doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
         story = []
         styles = getSampleStyleSheet()
 
-        # Encabezado
-        story.append(Paragraph("<b>INFORME TÉCNICO DE LIBERACIÓN Y CUANTIFICACIÓN ANALÍTICA</b>", styles['Title']))
+        title_style = ParagraphStyle(
+            'DocTitle', parent=styles['Title'], fontName='Helvetica-Bold', fontSize=14, leading=18, textColor=colors.HexColor("#0F172A"), alignment=1
+        )
+        story.append(Paragraph("INFORME TÉCNICO Y LIBERACIÓN DE CALIDAD", title_style))
         story.append(Spacer(1, 10))
 
         info_header = f"""
         <b>Lote:</b> {lote_cuant} | <b>Producto:</b> {row_param['Producto']}<br/>
-        <b>Parámetro:</b> {param_cuant} ({row_param['Tecnica']})<br/>
+        <b>Parámetro Evaluado:</b> {param_cuant} ({row_param['Tecnica']})<br/>
+        <b>Ficha Técnica / Especificación:</b> {spec_min} - {spec_max} {row_param['Unidad']}<br/>
         <b>Analista:</b> {analista_nombre} | <b>Supervisor:</b> {sup_nombre}<br/>
         <b>Fecha de Emisión:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """
         story.append(Paragraph(info_header, styles['Normal']))
         story.append(Spacer(1, 12))
 
-        # Tabla Resumen Analítico
+        # Tabla Resumen
         tabla_resumen = [
-            ["Ecuación de Calibración", "Coeficiente R²", "Resultado Muestra", "Especificación", "Dictamen"],
-            [f"Y = {slope:.4f}X + {intercept:.4f}", f"{r2:.5f}", f"{conc_muestra:.2f} {row_param['Unidad']}", f"{spec_min} - {spec_max} {row_param['Unidad']}", dictamen]
+            ["Ecuación de Calibración", "Coeficiente R²", "Absorbancia Lectura", "Resultado Calculado", "Estatus"],
+            [f"Y = {slope:.4f}X + {intercept:.4f}", f"{r2:.5f}", f"{abs_muestra:.3f}", f"{conc_muestra:.2f} {row_param['Unidad']}", dictamen]
         ]
-        t_res = Table(tabla_resumen, colWidths=[130, 80, 110, 110, 80])
+        t_res = Table(tabla_resumen, colWidths=[130, 80, 100, 110, 80])
         t_res.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0F172A")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
@@ -174,17 +208,16 @@ with tab_curva:
             ('PADDING', (0,0), (-1,-1), 5)
         ]))
         story.append(t_res)
-        story.append(Spacer(1, 15))
+        story.append(Spacer(1, 12))
 
-        # Insertar Gráfica en el PDF
-        story.append(Paragraph("<b>CUANTIFICACIÓN GRÁFICA (REGRESIÓN LINEAL)</b>", styles['Heading2']))
+        # Insertar Gráfica
+        story.append(Paragraph("<b>CUANTIFICACIÓN GRÁFICA (REGRESIÓN LINEAL)</b>", styles['Heading3']))
         story.append(Spacer(1, 5))
-        story.append(RLImage(img_buffer, width=420, height=224))
-        story.append(Spacer(1, 15))
+        story.append(RLImage(img_buffer, width=400, height=213))
+        story.append(Spacer(1, 10))
 
-        # Pie con Firma Digital
         firma_text = f"""
-        <b>ESTATUS DE LIBERACIÓN:</b> <font color="{'green' if dictamen == 'CUMPLE' else 'red'}"><b>{dictamen}</b></font><br/>
+        <b>DICTAMEN GENERAL DE LIBERACIÓN:</b> <font color="{'green' if dictamen == 'CUMPLE' else 'red'}"><b>{dictamen}</b></font><br/>
         ____________________________________________<br/>
         <b>Firma de Conformidad:</b> {sup_nombre}
         """
@@ -204,10 +237,8 @@ with tab_curva:
             'dictamen': dictamen
         }
 
-        st.success(f"✅ Informe Oficial del Lote {lote_cuant} generado correctamente con la curva integrada.")
-        
-        # Muestra previa en pantalla
-        st.image(img_buffer, caption=f"Curva de Calibración Oficial - {param_cuant}", use_column_width=False, width=500)
+        st.success(f"✅ Informe Oficial del Lote {lote_cuant} generado correctamente.")
+        st.image(img_buffer, caption=f"Curva de Calibración Oficial - {param_cuant}", width=500)
         
         st.download_button(
             label=f"📥 Descargar Informe PDF Oficial ({lote_cuant})",
@@ -217,7 +248,47 @@ with tab_curva:
         )
 
 # =========================================================
-# TAB 2: CERTIFICADOS E HISTORIAL
+# TAB 3: CARGA DE LOTE COMPLETO
+# =========================================================
+with tab_carga:
+    st.subheader("📤 Evaluación Automática de Lote Completo contra Base Maestro")
+    
+    col_l1, col_l2 = st.columns(2)
+    with col_l1:
+        lote_exp = st.text_input("Número de Lote:", value="LOTE-2026-001", key="ti_lote_exp")
+    with col_l2:
+        analista_exp = st.text_input("Analista:", value="Analista QC", key="ti_analista_exp")
+
+    archivo_equipo = st.file_uploader("Selecciona el Excel del Equipo Analítico:", type=["xlsx", "csv"], key="uploader_equipo")
+
+    if archivo_equipo is not None:
+        try:
+            df_equipo = pd.read_csv(archivo_equipo) if archivo_equipo.name.endswith('.csv') else pd.read_excel(archivo_equipo)
+            col_id = st.selectbox("Columna con ID o Nombre del Parámetro:", df_equipo.columns.tolist())
+            col_res = st.selectbox("Columna con el Resultado Obtenido:", [c for c in df_equipo.columns if c != col_id])
+
+            if st.button("🔄 EVALUAR LOTE CONTRA BASE MAESTRO", type="primary"):
+                df_merged = pd.merge(df_equipo, st.session_state.base_maestro, left_on=col_id, right_on="Parametro", how="inner")
+                if df_merged.empty:
+                    df_merged = pd.merge(df_equipo, st.session_state.base_maestro, left_on=col_id, right_on="ID_Elemento", how="inner")
+
+                if df_merged.empty:
+                    st.error("❌ No se encontraron coincidencias entre el archivo y la Base Maestro.")
+                else:
+                    def evaluar(row):
+                        v = float(row[col_res])
+                        s_min = float(row['Especificacion_Min'])
+                        s_max = float(row['Especificacion_Max'])
+                        return "CUMPLE" if s_min <= v <= s_max else "OOS (DESVÍO)"
+
+                    df_merged['Dictamen'] = df_merged.apply(evaluar, axis=1)
+                    st.dataframe(df_merged, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error al procesar el archivo: {e}")
+
+# =========================================================
+# TAB 4: CERTIFICADOS E HISTORIAL
 # =========================================================
 with tab_historial:
     st.subheader("📜 Historial de Informes Emitidos")
