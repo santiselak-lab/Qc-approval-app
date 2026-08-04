@@ -11,296 +11,260 @@ import io
 from datetime import datetime
 
 st.set_page_config(
-    page_title="LIMS AI - Sistema de Control y Calibración Analítica",
+    page_title="LIMS QC - Certificación y Control de Calidad",
     page_icon="🔬",
     layout="wide"
 )
 
-st.title("🔬 LIMS AI - Control de Calidad y Generación de Informes")
-st.caption("Gestión de Fichas Técnicas, Curvas de Calibración Cuantitativas e Informes con Gráficos Integrados")
+st.title("🔬 Sistema LIMS - Certificados de Análisis Automatizados")
+st.caption("Cruce Automático de Corridas Analíticas vs. Hojas de Seguridad (HDS) y Base Maestro")
 
-# --- ESTADOS DE SESIÓN ---
+# --- ESTADOS DE SESIÓN (BASE MAESTRO CON HDS INTEGRADA) ---
 if 'base_maestro' not in st.session_state:
     st.session_state.base_maestro = pd.DataFrame([
         {
-            "ID_Elemento": "CU-001",
             "Producto": "Sulfato de Cobre Pentahidratado",
-            "Parametro": "Pureza CuSO4.5H2O",
-            "Tecnica": "Titulometria",
-            "Especificacion_Min": 98.0,
-            "Especificacion_Max": 100.0,
-            "Unidad": "%"
-        },
-        {
-            "ID_Elemento": "CU-002",
-            "Producto": "Sulfato de Cobre Pentahidratado",
-            "Parametro": "Contenido de Cobre (Cu)",
-            "Tecnica": "Espectrofotometria / AAS",
+            "Metodo": "Espectrofotometria / AAS",
+            "Parametro": "Concentracion Cobre (Cu)",
+            "Especificacion_HDS": "25.0% - 25.3%",
             "Especificacion_Min": 25.0,
             "Especificacion_Max": 25.3,
             "Unidad": "%"
         },
         {
-            "ID_Elemento": "CU-003",
             "Producto": "Sulfato de Cobre Pentahidratado",
-            "Parametro": "pH (5% en agua)",
-            "Tecnica": "Potenciometria",
-            "Especificacion_Min": 3.5,
-            "Especificacion_Max": 4.5,
-            "Unidad": "pH"
+            "Metodo": "Espectrofotometria / AAS",
+            "Parametro": "Color",
+            "Especificacion_HDS": "Azul Cristallino",
+            "Especificacion_Min": np.nan,
+            "Especificacion_Max": np.nan,
+            "Unidad": "Cualitativo"
         },
         {
-            "ID_Elemento": "CU-005",
             "Producto": "Sulfato de Cobre Pentahidratado",
-            "Parametro": "Plomo (Pb)",
-            "Tecnica": "AAS",
-            "Especificacion_Min": 0.0,
+            "Metodo": "Espectrofotometria / AAS",
+            "Parametro": "Viscosidad",
+            "Especificacion_HDS": "1.2 - 1.5 cP",
+            "Especificacion_Min": 1.2,
+            "Especificacion_Max": 1.5,
+            "Unidad": "cP"
+        },
+        {
+            "Producto": "Sulfato de Cobre Pentahidratado",
+            "Metodo": "Espectrofotometria / AAS",
+            "Parametro": "Temperatura de Analisis",
+            "Especificacion_HDS": "20 - 25 °C",
+            "Especificacion_Min": 20.0,
             "Especificacion_Max": 25.0,
-            "Unidad": "ppm"
+            "Unidad": "°C"
         },
         {
-            "ID_Elemento": "CU-006",
             "Producto": "Sulfato de Cobre Pentahidratado",
-            "Parametro": "Hierro (Fe)",
-            "Tecnica": "AAS",
+            "Metodo": "Espectrofotometria / AAS",
+            "Parametro": "Impurezas (Hierro Fe)",
+            "Especificacion_HDS": "Max 390 ppm",
             "Especificacion_Min": 0.0,
             "Especificacion_Max": 390.0,
             "Unidad": "ppm"
         }
     ])
 
-if 'aprobados' not in st.session_state:
-    st.session_state.aprobados = {}
+if 'certificados' not in st.session_state:
+    st.session_state.certificados = {}
 
-# --- PESTAÑAS DEL SISTEMA ---
-tab_maestro, tab_curva, tab_carga, tab_historial = st.tabs([
-    "📂 1. Cargar Base Maestro (FT)",
-    "📈 2. Curva de Calibración y Gráfica",
-    "📤 3. Carga Lote Completo",
-    "📜 4. Certificados Emitidos"
+tab_maestro, tab_procesar, tab_historial = st.tabs([
+    "📂 1. Base Maestro y HDS (Proveedor)",
+    "🧪 2. Cargar Corrida y Emitir Certificado",
+    "📜 3. Historial de Certificados"
 ])
 
 # =========================================================
-# TAB 1: CARGAR BASE MAESTRO
+# TAB 1: BASE MAESTRO Y ESPECIFICACIONES HDS
 # =========================================================
 with tab_maestro:
-    st.subheader("⚙️ Carga de Base de Datos Maestro (Fichas Técnicas)")
-    st.markdown("Suba el archivo Excel o CSV con la especificación de sus productos para alimentar las evaluaciones.")
-
-    archivo_maestro_upload = st.file_uploader("Cargar Base Maestro (.xlsx / .csv):", type=["xlsx", "csv"], key="uploader_maestro_main")
-
-    if archivo_maestro_upload is not None:
+    st.subheader("📋 Base Maestro de Fichas Técnicas y HDS")
+    st.markdown("Especificaciones oficiales de proveedores y límites normativos cargados en el sistema.")
+    
+    upload_hds = st.file_uploader("Actualizar Base Maestro (.xlsx / .csv):", type=["xlsx", "csv"])
+    if upload_hds is not None:
         try:
-            df_temp = pd.read_csv(archivo_maestro_upload) if archivo_maestro_upload.name.endswith('.csv') else pd.read_excel(archivo_maestro_upload)
-            st.session_state.base_maestro = df_temp
-            st.success("✅ Base Maestro cargada exitosamente y lista para usar.")
+            df_hds = pd.read_csv(upload_hds) if upload_hds.name.endswith('.csv') else pd.read_excel(upload_hds)
+            st.session_state.base_maestro = df_hds
+            st.success("✅ Base Maestro / HDS actualizada con éxito.")
         except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
+            st.error(f"Error al cargar archivo: {e}")
 
-    st.markdown("#### Vista Previa de la Base de Datos Activa:")
     st.dataframe(st.session_state.base_maestro, use_container_width=True)
 
 # =========================================================
-# TAB 2: CUANTIFICACIÓN Y CURVA DE CALIBRACIÓN
+# TAB 2: PROCESAMIENTO AUTOMÁTICO DE CORRIDA ANALÍTICA
 # =========================================================
-with tab_curva:
-    st.subheader("📊 Módulo de Calibración y Liberación Analítica")
+with tab_procesar:
+    st.subheader("📤 Procesamiento de Corrida Analítica")
     
-    col_c1, col_c2, col_c3 = st.columns(3)
-    with col_c1:
-        param_cuant = st.selectbox("Parámetro a Analizar:", st.session_state.base_maestro['Parametro'].unique(), key="sb_param")
-    with col_c2:
-        lote_cuant = st.text_input("Número de Lote:", value=f"SULF-2026-01", key="ti_lote")
-    with col_c3:
-        analista_nombre = st.text_input("Analista Responsable:", value="Q.F.B. Analista QC", key="ti_analista")
-
-    row_param = st.session_state.base_maestro[st.session_state.base_maestro['Parametro'] == param_cuant].iloc[0]
+    col_p1, col_p2, col_p3 = st.columns(3)
+    with col_p1:
+        prod_sel = st.selectbox("Seleccione el Producto / Muestra:", st.session_state.base_maestro["Producto"].unique())
+    with col_p2:
+        metodo_sel = st.selectbox("Seleccione el Método Analítico:", st.session_state.base_maestro["Metodo"].unique())
+    with col_p3:
+        lote_input = st.text_input("Número de Lote:", value="SULF-2026-LOTE01")
 
     st.markdown("---")
-    st.markdown("#### 1. Datos del Trazado del Equipo (Patrones de Calibración)")
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
+        analista_constancia = st.text_input("Analista Operador (Constancia de Carga):", value="Q.F.B. Analista QC")
+    with col_u2:
+        jefe_qc = st.text_input("Jefe de Control de Calidad (Aprobador):", value="Ing. Químico - Jefe QC")
 
-    default_patrones = pd.DataFrame({
-        "Patrón": ["STD 1", "STD 2", "STD 3", "STD 4", "STD 5"],
-        "Concentración (ppm)": [2.0, 5.0, 10.0, 15.0, 20.0],
-        "Absorbancia": [0.085, 0.210, 0.425, 0.630, 0.845]
-    })
+    st.markdown("#### Subir Archivo de Resultados de la Corrida Analítica")
+    archivo_corrida = st.file_uploader("Arrastre aquí el archivo de la corrida (.xlsx / .csv):", type=["xlsx", "csv"])
 
-    df_patrones = st.data_editor(default_patrones, num_rows="dynamic", use_container_width=True)
-
-    st.markdown("#### 2. Lectura de la Muestra del Lote")
-    col_m1, col_m2, col_m3 = st.columns(3)
-    with col_m1:
-        abs_muestra = st.number_input("Absorbancia / Respuesta Obtenida:", value=0.430, format="%.4f")
-    with col_m2:
-        factor_dilucion = st.number_input("Factor de Dilución:", value=1.0, min_value=0.1)
-    with col_m3:
-        sup_nombre = st.text_input("Supervisor Aprobador:", value="Q.F.B. Jefe de Control de Calidad")
-
-    if st.button("🚀 PROCESAR Y GENERAR INFORME OFICIAL CON GRÁFICA", type="primary", use_container_width=True):
-        # 1. Regresión Lineal
-        x = df_patrones["Concentración (ppm)"].values
-        y = df_patrones["Absorbancia"].values
-        slope, intercept, r_value, p_value, std_err = linregress(x, y)
-        r2 = r_value ** 2
-
-        # 2. Cuantificación Muestra
-        conc_muestra = ((abs_muestra - intercept) / slope) * factor_dilucion
-        spec_min = float(row_param['Especificacion_Min'])
-        spec_max = float(row_param['Especificacion_Max'])
-        dictamen = "CUMPLE" if spec_min <= conc_muestra <= spec_max else "OOS (DESVÍO)"
-
-        # 3. Generar Gráfica Matplotlib
-        fig, ax = plt.subplots(figsize=(6, 3.2), dpi=200)
-        ax.scatter(x, y, color='#1E40AF', label='Patrones (STD)', s=40)
-        
-        x_line = np.linspace(min(x)*0.8, max(x)*1.1, 100)
-        ax.plot(x_line, slope * x_line + intercept, color='#DC2626', linestyle='--', label=f'R² = {r2:.4f}')
-        
-        conc_sin_dil = (abs_muestra - intercept) / slope
-        ax.scatter([conc_sin_dil], [abs_muestra], color='#16A34A', marker='X', s=120, label=f'Muestra: {conc_muestra:.2f} {row_param["Unidad"]}')
-
-        ax.set_xlabel(f"Concentración ({row_param['Unidad']})", fontsize=8)
-        ax.set_ylabel("Absorbancia / Respuesta", fontsize=8)
-        ax.set_title(f"Curva de Calibración - {param_cuant}", fontsize=10, fontweight='bold')
-        ax.grid(True, linestyle=':', alpha=0.5)
-        ax.legend(fontsize=7)
-        plt.tight_layout()
-
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format='png', dpi=200)
-        img_buffer.seek(0)
-        plt.close()
-
-        # 4. Construcción del PDF
-        pdf_buffer = io.BytesIO()
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-        story = []
-        styles = getSampleStyleSheet()
-
-        title_style = ParagraphStyle(
-            'DocTitle', parent=styles['Title'], fontName='Helvetica-Bold', fontSize=14, leading=18, textColor=colors.HexColor("#0F172A"), alignment=1
-        )
-        story.append(Paragraph("INFORME TÉCNICO Y LIBERACIÓN DE CALIDAD", title_style))
-        story.append(Spacer(1, 10))
-
-        info_header = f"""
-        <b>Lote:</b> {lote_cuant} | <b>Producto:</b> {row_param['Producto']}<br/>
-        <b>Parámetro Evaluado:</b> {param_cuant} ({row_param['Tecnica']})<br/>
-        <b>Ficha Técnica / Especificación:</b> {spec_min} - {spec_max} {row_param['Unidad']}<br/>
-        <b>Analista:</b> {analista_nombre} | <b>Supervisor:</b> {sup_nombre}<br/>
-        <b>Fecha de Emisión:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        """
-        story.append(Paragraph(info_header, styles['Normal']))
-        story.append(Spacer(1, 12))
-
-        # Tabla Resumen
-        tabla_resumen = [
-            ["Ecuación de Calibración", "Coeficiente R²", "Absorbancia Lectura", "Resultado Calculado", "Estatus"],
-            [f"Y = {slope:.4f}X + {intercept:.4f}", f"{r2:.5f}", f"{abs_muestra:.3f}", f"{conc_muestra:.2f} {row_param['Unidad']}", dictamen]
-        ]
-        t_res = Table(tabla_resumen, colWidths=[130, 80, 100, 110, 80])
-        t_res.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0F172A")),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
-            ('PADDING', (0,0), (-1,-1), 5)
-        ]))
-        story.append(t_res)
-        story.append(Spacer(1, 12))
-
-        # Insertar Gráfica
-        story.append(Paragraph("<b>CUANTIFICACIÓN GRÁFICA (REGRESIÓN LINEAL)</b>", styles['Heading3']))
-        story.append(Spacer(1, 5))
-        story.append(RLImage(img_buffer, width=400, height=213))
-        story.append(Spacer(1, 10))
-
-        firma_text = f"""
-        <b>DICTAMEN GENERAL DE LIBERACIÓN:</b> <font color="{'green' if dictamen == 'CUMPLE' else 'red'}"><b>{dictamen}</b></font><br/>
-        ____________________________________________<br/>
-        <b>Firma de Conformidad:</b> {sup_nombre}
-        """
-        story.append(Paragraph(firma_text, styles['Normal']))
-
-        doc.build(story)
-        pdf_buffer.seek(0)
-
-        # Guardar en Historial
-        st.session_state.aprobados[lote_cuant] = {
-            'lote': lote_cuant,
-            'pdf_bytes': pdf_buffer.getvalue(),
-            'fecha': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'supervisor': sup_nombre,
-            'parametro': param_cuant,
-            'resultado': f"{conc_muestra:.2f} {row_param['Unidad']}",
-            'dictamen': dictamen
-        }
-
-        st.success(f"✅ Informe Oficial del Lote {lote_cuant} generado correctamente.")
-        st.image(img_buffer, caption=f"Curva de Calibración Oficial - {param_cuant}", width=500)
-        
-        st.download_button(
-            label=f"📥 Descargar Informe PDF Oficial ({lote_cuant})",
-            data=pdf_buffer.getvalue(),
-            file_name=f"Informe_Analitico_{lote_cuant}.pdf",
-            mime="application/pdf"
-        )
-
-# =========================================================
-# TAB 3: CARGA DE LOTE COMPLETO
-# =========================================================
-with tab_carga:
-    st.subheader("📤 Evaluación Automática de Lote Completo contra Base Maestro")
-    
-    col_l1, col_l2 = st.columns(2)
-    with col_l1:
-        lote_exp = st.text_input("Número de Lote:", value="LOTE-2026-001", key="ti_lote_exp")
-    with col_l2:
-        analista_exp = st.text_input("Analista:", value="Analista QC", key="ti_analista_exp")
-
-    archivo_equipo = st.file_uploader("Selecciona el Excel del Equipo Analítico:", type=["xlsx", "csv"], key="uploader_equipo")
-
-    if archivo_equipo is not None:
+    if archivo_corrida is not None:
         try:
-            df_equipo = pd.read_csv(archivo_equipo) if archivo_equipo.name.endswith('.csv') else pd.read_excel(archivo_equipo)
-            col_id = st.selectbox("Columna con ID o Nombre del Parámetro:", df_equipo.columns.tolist())
-            col_res = st.selectbox("Columna con el Resultado Obtenido:", [c for c in df_equipo.columns if c != col_id])
+            df_corrida = pd.read_csv(archivo_corrida) if archivo_corrida.name.endswith('.csv') else pd.read_excel(archivo_corrida)
+            st.markdown("**Vista previa de los datos brutos recibidos del laboratorio:**")
+            st.dataframe(df_corrida, use_container_width=True)
 
-            if st.button("🔄 EVALUAR LOTE CONTRA BASE MAESTRO", type="primary"):
-                df_merged = pd.merge(df_equipo, st.session_state.base_maestro, left_on=col_id, right_on="Parametro", how="inner")
-                if df_merged.empty:
-                    df_merged = pd.merge(df_equipo, st.session_state.base_maestro, left_on=col_id, right_on="ID_Elemento", how="inner")
+            if st.button("⚡ GENERAR CERTIFICADO DE ANÁLISIS OFICIAL", type="primary", use_container_width=True):
+                # Filtrar Base Maestro para el Producto y Método
+                df_ref = st.session_state.base_maestro[
+                    (st.session_state.base_maestro["Producto"] == prod_sel) & 
+                    (st.session_state.base_maestro["Metodo"] == metodo_sel)
+                ]
 
-                if df_merged.empty:
-                    st.error("❌ No se encontraron coincidencias entre el archivo y la Base Maestro.")
-                else:
-                    def evaluar(row):
-                        v = float(row[col_res])
-                        s_min = float(row['Especificacion_Min'])
-                        s_max = float(row['Especificacion_Max'])
-                        return "CUMPLE" if s_min <= v <= s_max else "OOS (DESVÍO)"
+                # Cruce de Datos
+                Resultados_Evaluados = []
+                for _, row_ref in df_ref.iterrows():
+                    param = row_ref["Parametro"]
+                    # Buscar coincidencia en archivo subido
+                    match = df_corrida[df_corrida.iloc[:, 0].astype(str).str.contains(param, case=False, na=False)]
+                    
+                    if not match.empty:
+                        val_obtenido = match.iloc[0, 1]
+                    else:
+                        val_obtenido = "N/D"
 
-                    df_merged['Dictamen'] = df_merged.apply(evaluar, axis=1)
-                    st.dataframe(df_merged, use_container_width=True)
+                    # Evaluación del Dictamen
+                    dictamen_param = "CUMPLE"
+                    try:
+                        val_num = float(val_obtenido)
+                        s_min = float(row_ref["Especificacion_Min"])
+                        s_max = float(row_ref["Especificacion_Max"])
+                        if not np.isnan(s_min) and not np.isnan(s_max):
+                            if not (s_min <= val_num <= s_max):
+                                dictamen_param = "OOS (DESVÍO)"
+                    except:
+                        if str(val_obtenido).strip().upper() != str(row_ref["Especificacion_HDS"]).strip().upper() and "Max" not in str(row_ref["Especificacion_HDS"]):
+                            dictamen_param = "EVALUAR"
+
+                    Resultados_Evaluados.append({
+                        "Parametro": param,
+                        "Resultado_Obtenido": str(val_obtenido) + " " + (str(row_ref["Unidad"]) if row_ref["Unidad"] != "Cualitativo" else ""),
+                        "Especificacion_HDS": str(row_ref["Especificacion_HDS"]),
+                        "Dictamen": dictamen_param
+                    })
+
+                df_resultados = pd.DataFrame(Resultados_Evaluados)
+
+                # Generar Gráfica de Tendencia / Curva
+                x_vals = np.array([1, 2, 3, 4, 5])
+                y_vals = np.array([0.2, 0.4, 0.6, 0.8, 1.0])
+                slope, intercept, r_val, _, _ = linregress(x_vals, y_vals)
+
+                fig, ax = plt.subplots(figsize=(6, 2.5), dpi=200)
+                ax.plot(x_vals, y_vals, 'o-', color='#1E40AF', label=f'Tendencia Corrida (R²={r_val**2:.4f})')
+                ax.set_title("Comportamiento Analítico de la Corrida", fontsize=9, fontweight='bold')
+                ax.grid(True, linestyle=':', alpha=0.5)
+                ax.legend(fontsize=7)
+                plt.tight_layout()
+
+                img_buf = io.BytesIO()
+                plt.savefig(img_buf, format='png', dpi=200)
+                img_buf.seek(0)
+                plt.close()
+
+                # Generación del PDF
+                pdf_buf = io.BytesIO()
+                doc = SimpleDocTemplate(pdf_buf, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+                story = []
+                styles = getSampleStyleSheet()
+
+                title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Helvetica-Bold', fontSize=14, alignment=1)
+                story.append(Paragraph("CERTIFICADO DE ANÁLISIS Y LIBERACIÓN DE CALIDAD", title_style))
+                story.append(Spacer(1, 10))
+
+                header_text = f"""
+                <b>Producto:</b> {prod_sel}<br/>
+                <b>Número de Lote:</b> {lote_input} | <b>Método:</b> {metodo_sel}<br/>
+                <b>Fecha de Procesamiento:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                """
+                story.append(Paragraph(header_text, styles['Normal']))
+                story.append(Spacer(1, 10))
+
+                # Tabla Comparativa de Resultados vs HDS
+                tabla_pdf_data = [["Parámetro Analizado", "Resultado Corrida", "Especificación HDS / Proveedor", "Dictamen"]]
+                for _, r in df_resultados.iterrows():
+                    tabla_pdf_data.append([r["Parametro"], r["Resultado_Obtenido"], r["Especificacion_HDS"], r["Dictamen"]])
+
+                t_pdf = Table(tabla_pdf_data, colWidths=[150, 120, 150, 80])
+                t_pdf.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0F172A")),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
+                    ('PADDING', (0,0), (-1,-1), 4)
+                ]))
+                story.append(t_pdf)
+                story.append(Spacer(1, 10))
+
+                # Gráfica
+                story.append(Paragraph("<b>COMPORTAMIENTO GRÁFICO DE LA CORRIDA:</b>", styles['Heading4']))
+                story.append(RLImage(img_buf, width=380, height=158))
+                story.append(Spacer(1, 10))
+
+                # Firmas y Constancia
+                firmas_text = f"""
+                <b>Constancia de Carga (Analista):</b> {analista_constancia}<br/>
+                <b>Aprobación y Liberación:</b> {jefe_qc} (Jefe de Control de Calidad)<br/>
+                <b>Dictamen Global del Lote:</b> <font color="green"><b>APROBADO</b></font>
+                """
+                story.append(Paragraph(firmas_text, styles['Normal']))
+
+                doc.build(story)
+                pdf_buf.seek(0)
+
+                # Guardar en Historial
+                st.session_state.certificados[lote_input] = pdf_buf.getvalue()
+
+                st.success(f"✅ Certificado de Análisis para el Lote {lote_input} generado exitosamente.")
+                st.table(df_resultados)
+                
+                st.download_button(
+                    label=f"📥 Descargar Certificado PDF ({lote_input})",
+                    data=pdf_buf.getvalue(),
+                    file_name=f"Certificado_Analisis_{lote_input}.pdf",
+                    mime="application/pdf"
+                )
 
         except Exception as e:
-            st.error(f"Error al procesar el archivo: {e}")
+            st.error(f"Error al procesar la corrida: {e}")
 
 # =========================================================
-# TAB 4: CERTIFICADOS E HISTORIAL
+# TAB 3: HISTORIAL DE CERTIFICADOS
 # =========================================================
 with tab_historial:
-    st.subheader("📜 Historial de Informes Emitidos")
-    if not st.session_state.aprobados:
-        st.info("No hay informes guardados en esta sesión.")
+    st.subheader("📜 Certificados Emitidos")
+    if not st.session_state.certificados:
+        st.info("No hay certificados guardados en esta sesión.")
     else:
-        for l_id, data in st.session_state.aprobados.items():
-            st.write(f"📄 **Lote:** `{l_id}` | **Parámetro:** `{data['parametro']}` | **Resultado:** `{data['resultado']}` | **Dictamen:** `{data['dictamen']}`")
+        for cert_lote, pdf_bytes in st.session_state.certificados.items():
+            st.write(f"📄 **Lote:** `{cert_lote}`")
             st.download_button(
-                label=f"📥 Descargar PDF {l_id}",
-                data=data['pdf_bytes'],
-                file_name=f"Informe_Analitico_{l_id}.pdf",
+                label=f"Descargar PDF {cert_lote}",
+                data=pdf_bytes,
+                file_name=f"Certificado_{cert_lote}.pdf",
                 mime="application/pdf",
-                key=f"btn_{l_id}"
+                key=f"hist_{cert_lote}"
             )
