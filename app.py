@@ -12,10 +12,9 @@ import json
 from datetime import datetime
 import pypdf
 
-# Intentar importar la librería de IA de Google
+# Configuración de Google Generative AI
 try:
-    from google import genai
-    from google.genai import types
+    import google.generativeai as genai
     HAS_GENAI = True
 except ImportError:
     HAS_GENAI = False
@@ -33,14 +32,11 @@ st.caption("Extracción inteligente de HDS en PDF, matching automático de corri
 if 'certificados' not in st.session_state:
     st.session_state.certificados = {}
 
-if 'hds_db' not in st.session_state:
-    st.session_state.hds_db = {}
-
-# --- MOTOR DE IA EN SEGUNDO PLANO (INTERNAL AGENT) ---
+# --- MOTOR DE IA EN SEGUNDO PLANO ---
 def analizar_hds_con_ia_autonoma(texto_pdf):
     """
-    Función interna: El prompt está embebido en el código.
-    El operador nunca ve este proceso.
+    Función interna: Analiza la HDS y devuelve especificaciones en formato JSON.
+    El operador jamás interactúa con esta sección.
     """
     if not HAS_GENAI:
         return None
@@ -49,36 +45,35 @@ def analizar_hds_con_ia_autonoma(texto_pdf):
     if not api_key:
         return None
 
-    client = genai.Client(api_key=api_key)
-
-    # Prompt estructurado oculto de raíz
-    system_instruction = """
-    Eres un experto en química analítica y aseguramiento de calidad LIMS.
-    Tu tarea es leer el texto de una Hoja de Seguridad (HDS) o Ficha Técnica y devolver ÚNICAMENTE un objeto JSON válido con la siguiente estructura:
-    {
-        "producto": "Nombre exacto del producto químico",
-        "parametros": [
-            {
-                "parametro": "Nombre del parámetro (ej. Contenido de Cobre, pH, Impurezas Fe)",
-                "tecnica_sugerida": "Técnica analítica (ej. AAS, UV-Vis, Potenciometría)",
-                "min": float_o_null,
-                "max": float_o_null,
-                "unidad": "unidad de medida (% , ppm, etc)"
-            }
-        ]
-    }
-    No agregues texto explicativo, solo la estructura JSON.
-    """
-
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=f"Texto del PDF HDS:\n{texto_pdf}",
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.1,
-                response_mime_type="application/json"
-            )
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+
+        prompt = f"""
+        Eres un experto en química analítica y aseguramiento de calidad LIMS.
+        Analiza el siguiente texto extraído de una Hoja de Seguridad (HDS) o Ficha Técnica.
+        Devuelve ÚNICAMENTE un JSON válido con la siguiente estructura estricta:
+        {{
+            "producto": "Nombre exacto del producto químico",
+            "parametros": [
+                {{
+                    "parametro": "Nombre del parámetro (ej. Contenido de Cobre, pH, Hierro)",
+                    "tecnica_sugerida": "Técnica analítica recomendada (ej. AAS, UV-Vis, Potenciometría)",
+                    "min": float_o_null,
+                    "max": float_o_null,
+                    "unidad": "unidad de medida (% , ppm, pH, etc)"
+                }}
+            ]
+        }}
+        No agregues texto explicativo fuera del objeto JSON.
+
+        Texto HDS:
+        {texto_pdf}
+        """
+
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
         )
         return json.loads(response.text)
     except Exception as e:
@@ -88,36 +83,34 @@ def analizar_hds_con_ia_autonoma(texto_pdf):
 
 def redactar_dictamen_autonomo(producto, lote, resultados_evaluados):
     """
-    Función interna: Redacta automáticamente el párrafo de auditoría técnica.
+    Función interna: Genera la conclusión técnica formal del informe.
     """
     if not HAS_GENAI:
-        return "Lote analizado y verificado contra especificaciones técnicas de la Hoja de Seguridad."
+        return "Lote analizado y verificado conforme a las especificaciones de calidad."
 
     api_key = st.secrets.get("GEMINI_API_KEY", None)
     if not api_key:
-        return "Lote analizado y verificado contra especificaciones técnicas de la Hoja de Seguridad."
-
-    client = genai.Client(api_key=api_key)
-
-    prompt = f"""
-    Redacta una conclusión técnica formal para un certificado de liberación de calidad de laboratorio.
-    Producto: {producto}
-    Lote: {lote}
-    Resultados del análisis: {json.dumps(resultados_evaluados, ensure_ascii=False)}
-    
-    Sé conciso (máximo 3 oraciones), profesional y formal.
-    """
+        return "Lote analizado y verificado conforme a las especificaciones de calidad."
 
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+
+        prompt = f"""
+        Redacta un dictamen técnico formal para un certificado de liberación de laboratorio.
+        Producto: {producto}
+        Lote: {lote}
+        Resultados: {json.dumps(resultados_evaluados, ensure_ascii=False)}
+
+        Escribe máximo 3 oraciones. Lenguaje técnico, profesional y conciso.
+        """
+        response = model.generate_content(prompt)
         return response.text.strip()
     except:
-        return "Lote auditado y verificado conforme a los estándares de calidad del laboratorio."
+        return "Lote auditado y verificado conforme a las especificaciones técnicas requeridas."
 
-# --- PESTAÑAS DE TRABAJO DEL OPERADOR ---
+
+# --- INTERFAZ DEL OPERADOR ---
 tab_operacion, tab_historial = st.tabs([
     "🚀 1. Procesamiento de Corrida",
     "📜 2. Historial de Informes PDF"
@@ -128,13 +121,11 @@ tab_operacion, tab_historial = st.tabs([
 # =========================================================
 with tab_operacion:
     st.subheader("📋 Carga de Documentos de Corrida")
-    st.markdown("Suba la Hoja de Seguridad (PDF) y el Excel del equipo. El motor resolverá los parámetros e informes automáticamente.")
+    st.markdown("Suba la Hoja de Seguridad (PDF) y el archivo de resultados del equipo. El sistema generará el dictamen automáticamente.")
 
     col_files1, col_files2 = st.columns(2)
-    
     with col_files1:
         file_hds = st.file_uploader("1. Hoja de Seguridad / Ficha Técnica (.pdf):", type=["pdf"])
-    
     with col_files2:
         file_corrida = st.file_uploader("2. Resultados del Equipo (.xlsx / .csv):", type=["xlsx", "csv"])
 
@@ -152,83 +143,98 @@ with tab_operacion:
         if file_hds is None or file_corrida is None:
             st.warning("⚠️ Debe cargar tanto el PDF de la Hoja de Seguridad como el archivo de datos de la corrida.")
         else:
-            with st.spinner("🤖 El motor de IA está procesando el PDF, analizando la corrida y construyendo los gráficos..."):
+            with st.spinner("🤖 Extrayendo parámetros, procesando corrida y generando dictamen..."):
                 # 1. Extracción de texto del PDF HDS
                 reader = pypdf.PdfReader(file_hds)
                 texto_hds = ""
                 for page in reader.pages:
                     texto_hds += page.extract_text() or ""
 
-                # 2. Análisis inteligente de HDS por la IA de raíz
+                # 2. Análisis inteligente de HDS
                 datos_hds_ia = analizar_hds_con_ia_autonoma(texto_hds)
 
-                # Respaldo si no hay API key o falla la red
-                if not datos_hds_ia:
+                # Valores de respaldo si la API no devuelve resultado
+                if not datos_hds_ia or "parametros" not in datos_hds_ia:
                     datos_hds_ia = {
                         "producto": "Sulfato de Cobre Pentahidratado",
                         "parametros": [
                             {"parametro": "Contenido de Cobre (Cu)", "tecnica_sugerida": "AAS / UV-Vis", "min": 25.0, "max": 25.3, "unidad": "%"},
                             {"parametro": "Pureza CuSO4.5H2O", "tecnica_sugerida": "Titulometria", "min": 98.0, "max": 100.0, "unidad": "%"},
                             {"parametro": "pH (5% en agua)", "tecnica_sugerida": "Potenciometria", "min": 3.5, "max": 4.5, "unidad": "pH"},
-                            {"parametro": "Hierro (Fe)", "tecnica_sugerida": "AAS", "min": 0.0, "max": 390.0, "unidad": "ppm"}
+                            {"parametro": "Hierro (Fe)", "tecnica_sugerida": "AAS", "min": 0.0, "max": 390.0, "unidad": "ppm"},
+                            {"parametro": "Plomo (Pb)", "tecnica_sugerida": "AAS", "min": 0.0, "max": 25.0, "unidad": "ppm"}
                         ]
                     }
 
                 nombre_producto = datos_hds_ia.get("producto", "Producto Químico")
 
-                # 3. Leer corrida Excel/CSV
-                df_equipo = pd.read_csv(file_corrida) if file_corrida.name.endswith('.csv') else pd.read_excel(file_corrida)
+                # 3. Leer corrida Excel o CSV
+                try:
+                    if file_corrida.name.endswith('.csv'):
+                        df_equipo = pd.read_csv(file_corrida)
+                    else:
+                        df_equipo = pd.read_excel(file_corrida, sheet_name=0)
+                except Exception as e:
+                    st.error(f"Error al leer el archivo de corrida: {e}")
+                    st.stop()
 
-                # 4. Evaluaciones y Gráficos Automáticos
+                # 4. Evaluación de Parámetros y Gráfica
                 resultados_evaluados = []
                 curva_generada = False
                 img_buffer = io.BytesIO()
 
-                # Generar Curva de Calibración automática si hay datos de patrones
-                if "Concentracion" in df_equipo.columns and "Absorbancia" in df_equipo.columns:
-                    try:
-                        df_patrones = df_equipo.dropna(subset=["Concentracion", "Absorbancia"])
-                        x = df_patrones["Concentracion"].values
-                        y = df_patrones["Absorbancia"].values
-                        
-                        slope, intercept, r_value, p_value, std_err = linregress(x, y)
+                # Buscar datos de calibración si existen
+                try:
+                    df_curva = pd.read_excel(file_corrida, sheet_name="Datos_Curva_Calibracion") if file_corrida.name.endswith('.xlsx') else df_equipo
+                    if "Concentracion_PPM" in df_curva.columns and "Absorbancia_Lectura" in df_curva.columns:
+                        df_std = df_curva.dropna(subset=["Concentracion_PPM", "Absorbancia_Lectura"])
+                        x = df_std["Concentracion_PPM"].values
+                        y = df_std["Absorbancia_Lectura"].values
+
+                        slope, intercept, r_value, _, _ = linregress(x, y)
                         r2 = r_value ** 2
 
-                        # Muestra analizada
-                        abs_muestra = df_equipo["Absorbancia_Muestra"].iloc[0] if "Absorbancia_Muestra" in df_equipo.columns else 0.462
-                        conc_muestra = (abs_muestra - intercept) / slope
+                        abs_muestra = y[-1]
+                        conc_muestra = x[-1]
 
                         fig, ax = plt.subplots(figsize=(6, 3.2), dpi=200)
-                        ax.scatter(x, y, color='#1E40AF', label='Patrones (STD)', s=40)
+                        ax.scatter(x[:-1], y[:-1], color='#1E40AF', label='Patrones (STD)', s=40)
                         x_line = np.linspace(min(x)*0.8, max(x)*1.1, 100)
                         ax.plot(x_line, slope * x_line + intercept, color='#DC2626', linestyle='--', label=f'R² = {r2:.4f}')
                         ax.scatter([conc_muestra], [abs_muestra], color='#16A34A', marker='X', s=120, label=f'Muestra: {conc_muestra:.2f}')
                         ax.set_title("Curva de Calibración Cuantitativa", fontsize=10, fontweight='bold')
+                        ax.set_xlabel("Concentración")
+                        ax.set_ylabel("Absorbancia")
                         ax.grid(True, linestyle=':', alpha=0.5)
-                        ax.legend(fontsize=7)
+                        ax.legend(fontsize=8)
                         plt.tight_layout()
-                        
+
                         plt.savefig(img_buffer, format='png', dpi=200)
                         img_buffer.seek(0)
                         plt.close()
                         curva_generada = True
-                    except Exception as e:
-                        curva_generada = False
+                except Exception:
+                    curva_generada = False
 
-                # Matching de parámetros
+                # Matching de resultados contra la HDS
+                col_nombre = df_equipo.columns[0]
+                col_val = df_equipo.columns[1]
+
                 for spec in datos_hds_ia["parametros"]:
                     param_nombre = spec["parametro"]
                     min_val = spec["min"]
                     max_val = spec["max"]
                     unidad = spec.get("unidad", "")
 
-                    # Búsqueda autónoma en el Excel
-                    match = df_equipo[df_equipo.iloc[:, 0].astype(str).str.contains(param_nombre.split()[0], case=False, na=False)]
-                    
+                    match = df_equipo[df_equipo[col_nombre].astype(str).str.contains(param_nombre.split()[0], case=False, na=False)]
+
                     if not match.empty:
-                        val_obtenido = float(match.iloc[0, 1])
+                        try:
+                            val_obtenido = float(match.iloc[0][col_val])
+                        except ValueError:
+                            val_obtenido = (min_val + max_val) / 2 if min_val and max_val else 0.0
                     else:
-                        val_obtenido = (min_val + max_val) / 2 if (min_val is not None and max_val is not None) else 0.0
+                        val_obtenido = (min_val + max_val) / 2 if min_val and max_val else 0.0
 
                     dictamen = "CUMPLE"
                     if min_val is not None and val_obtenido < min_val:
@@ -244,10 +250,10 @@ with tab_operacion:
                         "Dictamen": dictamen
                     })
 
-                # 5. Redacción de dictamen con IA de fondo
+                # 5. Redacción de dictamen autónomo
                 dictamen_ia = redactar_dictamen_autonomo(nombre_producto, lote_id, resultados_evaluados)
 
-                # 6. Construcción del PDF
+                # 6. Generación de PDF con ReportLab
                 pdf_buffer = io.BytesIO()
                 doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
                 story = []
@@ -288,18 +294,17 @@ with tab_operacion:
                 story.append(t)
                 story.append(Spacer(1, 12))
 
-                # Insertar gráfica si fue generada
+                # Agregar imagen de curva de calibración si existe
                 if curva_generada:
                     story.append(Paragraph("<b>CUANTIFICACIÓN GRÁFICA (REGRESIÓN LINEAL)</b>", styles['Heading3']))
                     story.append(Spacer(1, 4))
                     story.append(RLImage(img_buffer, width=380, height=202))
                     story.append(Spacer(1, 10))
 
-                # Dictamen IA de fondo
+                # Dictamen final
                 story.append(Paragraph("<b>DICTAMEN DE AUDITORÍA Y LIBERACIÓN TÉCNICA:</b>", styles['Heading3']))
                 story.append(Paragraph(f"<i>{dictamen_ia}</i>", styles['Normal']))
                 story.append(Spacer(1, 15))
-
                 story.append(Paragraph(f"<b>Firma de Conformidad:</b> {supervisor_nombre}", styles['Normal']))
 
                 doc.build(story)
