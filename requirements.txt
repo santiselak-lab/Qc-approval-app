@@ -1,8 +1,8 @@
 streamlit
 pandas
 numpy
-reportlab
-matplotlib
 scipy
-pypdf
-google-genai
+matplotlib
+reportlab
+openpyxl
+google-generativeai
