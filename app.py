@@ -10,7 +10,7 @@ from reportlab.lib import colors
 import io
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 import pypdf
 
 # Configuración de Google Generative AI
@@ -26,8 +26,11 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- PROTECCIÓN CONTRA TRADUCTOR AUTOMÁTICO DE CHROME ---
+st.markdown('<div class="notranslate">', unsafe_allow_html=True)
+
 st.title("🔬 LIMS QC - Control de Calidad & Liberación de Lotes")
-st.caption("Base Maestra Integrada, Cálculo por Fórmula Matemática y Certificación Automatizada")
+st.caption("Base Maestra Integrada, Detección de Tendencias por IA y Certificación Automatizada")
 
 # --- BASE DE DATOS MAESTRA PERSISTENTE EN SESIÓN ---
 if 'bd_productos' not in st.session_state:
@@ -43,10 +46,21 @@ if 'bd_productos' not in st.session_state:
         }
     }
 
+# Historico simulado inicial para tendencias
+if 'historial_mediciones' not in st.session_state:
+    fechas = [datetime.now() - timedelta(days=i*3) for i in range(10, 0, -1)]
+    st.session_state.historial_mediciones = pd.DataFrame({
+        "Fecha": fechas,
+        "Lote": [f"LOTE-202607{10+i:02d}" for i in range(10)],
+        "Producto": ["Sulfato de Cobre Pentahidratado"] * 10,
+        "Contenido de Cobre (Cu)": [25.12, 25.14, 25.15, 25.18, 25.20, 25.22, 25.25, 25.27, 25.28, 25.29], # Tendencia alcista
+        "pH (5% en agua)": [4.0, 3.9, 4.1, 4.0, 3.9, 4.0, 4.1, 3.9, 4.0, 3.9]
+    })
+
 if 'certificados' not in st.session_state:
     st.session_state.certificados = {}
 
-# --- HELPER FUNCTIONS DE IA EN SEGUNDO PLANO ---
+# --- HELPER FUNCTIONS DE IA ---
 def analizar_hds_pdf(texto_pdf):
     if not HAS_GENAI:
         return None
@@ -79,15 +93,44 @@ def analizar_hds_pdf(texto_pdf):
     except:
         return None
 
+def analizar_tendencia_ia(df_historico_prod, producto):
+    if not HAS_GENAI:
+        return "IA no configurada (falta la librería google-generativeai)."
+    api_key = st.secrets.get("GEMINI_API_KEY", None)
+    if not api_key:
+        return "Para habilitar el diagnóstico predictivo por IA, configura GEMINI_API_KEY en st.secrets."
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        resumen_datos = df_historico_prod.to_string()
+        prompt = f"""
+        Actúa como un experto en Control Estadístico de Procesos (SPC) e Inestabilidad de Calidad.
+        Analiza la siguiente serie de tiempo de los últimos lotes del producto '{producto}':
+
+        {resumen_datos}
+
+        Identifica:
+        1. Si hay tendencias sostenidas al alza o a la baja (drift/shift).
+        2. Riesgos de salirse de especificación en los próximos lotes.
+        3. Recomendación técnica preventiva para el equipo de producción/QC.
+
+        Responde en un párrafo conciso, técnico y directo.
+        """
+        resp = model.generate_content(prompt)
+        return resp.text
+    except Exception as e:
+        return f"Error al procesar el análisis de tendencias con la IA: {e}"
+
 # --- PESTAÑAS DE LA APLICACIÓN ---
-tab_operacion, tab_maestro, tab_historial = st.tabs([
+tab_operacion, tab_tendencias, tab_maestro, tab_historial = st.tabs([
     "🧪 1. Procesar Corrida & Emitir Informe",
-    "⚙️ 2. BD Maestra de Productos y HDS",
-    "📜 3. Historial de Informes PDF"
+    "📈 2. Control de Tendencias & IA Predictiva",
+    "⚙️ 3. BD Maestra de Productos y HDS",
+    "📜 4. Historial de Informes PDF"
 ])
 
 # =========================================================
-# TAB 1: OPERACIÓN DIARIA DEL ANALISTA (SIN RECARGAR HOJAS)
+# TAB 1: OPERACIÓN DIARIA DEL ANALISTA
 # =========================================================
 with tab_operacion:
     st.subheader("📋 Registro y Evaluación de Corrida")
@@ -120,6 +163,8 @@ with tab_operacion:
                 col_val = df_corrida.columns[1]
 
                 resultados_evaluados = []
+                nuevos_datos_historicos = {"Fecha": datetime.now(), "Lote": lote_input, "Producto": prod_seleccionado}
+
                 for spec in especificaciones_prod:
                     p_nom = spec["parametro"]
                     min_hds = spec.get("min_hds")
@@ -137,6 +182,8 @@ with tab_operacion:
                             val_obtenido = 0.0
                     else:
                         val_obtenido = (min_hds + max_hds) / 2 if min_hds and max_hds else 0.0
+
+                    nuevos_datos_historicos[p_nom] = val_obtenido
 
                     # Evaluación Doble (HDS vs Interno)
                     dictamen = "CUMPLE"
@@ -158,6 +205,12 @@ with tab_operacion:
                         "Resultado": f"{val_obtenido:.2f} {unidad}",
                         "Dictamen": dictamen
                     })
+
+                # Guardar mediciones en el histórico para análisis de tendencias
+                st.session_state.historial_mediciones = pd.concat([
+                    st.session_state.historial_mediciones,
+                    pd.DataFrame([nuevos_datos_historicos])
+                ], ignore_index=True)
 
                 df_eval = pd.DataFrame(resultados_evaluados)
 
@@ -228,7 +281,7 @@ with tab_operacion:
                 story.append(t)
                 story.append(Spacer(1, 12))
 
-                # Sección Gráfica (Sin el título "Regresión Lineal")
+                # Sección Gráfica
                 if curva_generada:
                     story.append(Paragraph("<b>COMPORTAMIENTO Y CUANTIFICACIÓN GRÁFICA</b>", styles['Heading3']))
                     story.append(Spacer(1, 4))
@@ -249,7 +302,7 @@ with tab_operacion:
                     "fecha": datetime.now().strftime('%Y-%m-%d %H:%M')
                 }
 
-                st.success("✅ Informe emitido exitosamente con la BD Maestra.")
+                st.success("✅ Informe emitido exitosamente con la BD Maestra e histórico actualizado.")
                 st.table(df_eval)
                 st.download_button(
                     label=f"📥 Descargar PDF Lote {lote_input}",
@@ -262,11 +315,61 @@ with tab_operacion:
             st.error(f"Error al procesar la corrida: {e}")
 
 # =========================================================
-# TAB 2: BASE DE DATOS MAESTRA PERSISTENTE
+# TAB 2: CONTROL DE TENDENCIAS HISTÓRICAS E IA PREDICTIVA
+# =========================================================
+with tab_tendencias:
+    st.subheader("📈 Gráficos de Control Estadístico de Procesos (SPC)")
+    
+    prod_hist = st.selectbox("Seleccione Producto para evaluar histórico:", list(st.session_state.bd_productos.keys()))
+    df_f = st.session_state.historial_mediciones[st.session_state.historial_mediciones["Producto"] == prod_hist]
+
+    if df_f.empty:
+        st.info("No hay datos históricos suficientes registrados para este producto.")
+    else:
+        # Selección de parámetro para graficar
+        columnas_params = [c for c in df_f.columns if c not in ["Fecha", "Lote", "Producto"]]
+        param_graf = st.selectbox("Seleccione el Parámetro a monitorear:", columnas_params)
+
+        fig_spc, ax_spc = plt.subplots(figsize=(8, 3.5), dpi=200)
+        ax_spc.plot(df_f["Lote"], df_f[param_graf], marker='o', color='#1E40AF', linewidth=2, label='Valor Medido')
+
+        # Buscar límites para la gráfica
+        specs = st.session_state.bd_productos[prod_hist]["especificaciones"]
+        spec_actual = next((item for item in specs if item["parametro"] == param_graf), None)
+
+        if spec_actual:
+            if spec_actual.get("max_hds") is not None:
+                ax_spc.axhline(spec_actual["max_hds"], color='#DC2626', linestyle='--', label=f'Límite Sup HDS ({spec_actual["max_hds"]})')
+            if spec_actual.get("min_hds") is not None:
+                ax_spc.axhline(spec_actual["min_hds"], color='#DC2626', linestyle='--', label=f'Límite Inf HDS ({spec_actual["min_hds"]})')
+            if spec_actual.get("max_int") is not None:
+                ax_spc.axhline(spec_actual["max_int"], color='#F59E0B', linestyle=':', label=f'Alerta Int Sup ({spec_actual["max_int"]})')
+            if spec_actual.get("min_int") is not None:
+                ax_spc.axhline(spec_actual["min_int"], color='#F59E0B', linestyle=':', label=f'Alerta Int Inf ({spec_actual["min_int"]})')
+
+        ax_spc.set_title(f"Evolución Histórica: {param_graf}", fontsize=11, fontweight='bold')
+        ax_spc.set_xlabel("Lotes Consecutivos")
+        ax_spc.set_ylabel("Resultado")
+        plt.xticks(rotation=45, ha='right')
+        ax_spc.grid(True, linestyle=':', alpha=0.6)
+        ax_spc.legend(fontsize=8, loc='upper left')
+        plt.tight_layout()
+
+        st.pyplot(fig_spc)
+
+        st.markdown("---")
+        st.markdown("#### 🤖 Diagnóstico Predictivo por Inteligencia Artificial")
+        if st.button("🔍 Auditar Tendencias del Producto con IA"):
+            with st.spinner("Gemini IA analizando deriva de datos históricos..."):
+                dictamen_ia = analizar_tendencia_ia(df_f, prod_hist)
+                st.info(f"**Dictamen Preventivo de Calidad:**\n\n{dictamen_ia}")
+
+# =========================================================
+# TAB 3: BASE DE DATOS MAESTRA PERSISTENTE
 # =========================================================
 with tab_maestro:
     st.subheader("⚙️ Administración de la Base de Datos Maestra")
-    st.markdown("Cargue las Hojas de Seguridad (HDS) o Fichas Técnicas **una sola vez**. El sistema almacenará los productos para futuras corridas.")
+    st.markdown("Cargue las Hojas de Seguridad (HDS) o Fichas Técnicas **una sola vez**.")
 
     file_hds_nuevo = st.file_uploader("Cargar nueva Hoja de Seguridad (PDF):", type=["pdf"])
     if file_hds_nuevo is not None:
@@ -290,7 +393,7 @@ with tab_maestro:
             st.json(prod_v)
 
 # =========================================================
-# TAB 3: HISTORIAL DE INFORMES PDF
+# TAB 4: HISTORIAL DE INFORMES PDF
 # =========================================================
 with tab_historial:
     st.subheader("📜 Historial de Certificados Emitidos")
@@ -306,3 +409,5 @@ with tab_historial:
                 mime="application/pdf",
                 key=f"hist_{l_id}"
             )
+
+st.markdown('</div>', unsafe_allow_html=True)
