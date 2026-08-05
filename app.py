@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 from scipy.stats import linregress
@@ -26,8 +27,17 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- PROTECCIÓN CONTRA TRADUCTOR AUTOMÁTICO DE CHROME ---
-st.markdown('<div class="notranslate">', unsafe_allow_html=True)
+# --- BLINDAJE ANTI-TRADUCTOR CHROME MÓVIL (EVITA ERROR removeChild / DOM MODIFICATION) ---
+components.html(
+    """
+    <script>
+        window.parent.document.documentElement.setAttribute('lang', 'es');
+        window.parent.document.documentElement.setAttribute('translate', 'no');
+        window.parent.document.body.classList.add('notranslate');
+    </script>
+    """,
+    height=0,
+)
 
 st.title("🔬 LIMS QC - Control de Calidad & Liberación de Lotes")
 st.caption("Base Maestra Integrada, Detección de Tendencias por IA y Certificación Automatizada")
@@ -46,14 +56,14 @@ if 'bd_productos' not in st.session_state:
         }
     }
 
-# Historico simulado inicial para tendencias
+# Histórico inicial para el módulo de tendencias
 if 'historial_mediciones' not in st.session_state:
     fechas = [datetime.now() - timedelta(days=i*3) for i in range(10, 0, -1)]
     st.session_state.historial_mediciones = pd.DataFrame({
         "Fecha": fechas,
         "Lote": [f"LOTE-202607{10+i:02d}" for i in range(10)],
         "Producto": ["Sulfato de Cobre Pentahidratado"] * 10,
-        "Contenido de Cobre (Cu)": [25.12, 25.14, 25.15, 25.18, 25.20, 25.22, 25.25, 25.27, 25.28, 25.29], # Tendencia alcista
+        "Contenido de Cobre (Cu)": [25.12, 25.14, 25.15, 25.18, 25.20, 25.22, 25.25, 25.27, 25.28, 25.29],
         "pH (5% en agua)": [4.0, 3.9, 4.1, 4.0, 3.9, 4.0, 4.1, 3.9, 4.0, 3.9]
     })
 
@@ -95,7 +105,7 @@ def analizar_hds_pdf(texto_pdf):
 
 def analizar_tendencia_ia(df_historico_prod, producto):
     if not HAS_GENAI:
-        return "IA no configurada (falta la librería google-generativeai)."
+        return "IA no disponible (falta la librería google-generativeai)."
     api_key = st.secrets.get("GEMINI_API_KEY", None)
     if not api_key:
         return "Para habilitar el diagnóstico predictivo por IA, configura GEMINI_API_KEY en st.secrets."
@@ -119,7 +129,7 @@ def analizar_tendencia_ia(df_historico_prod, producto):
         resp = model.generate_content(prompt)
         return resp.text
     except Exception as e:
-        return f"Error al procesar el análisis de tendencias con la IA: {e}"
+        return f"Error al procesar el análisis con la IA: {e}"
 
 # --- PESTAÑAS DE LA APLICACIÓN ---
 tab_operacion, tab_tendencias, tab_maestro, tab_historial = st.tabs([
@@ -185,7 +195,7 @@ with tab_operacion:
 
                     nuevos_datos_historicos[p_nom] = val_obtenido
 
-                    # Evaluación Doble (HDS vs Interno)
+                    # Evaluación Doble
                     dictamen = "CUMPLE"
                     if max_hds and val_obtenido > max_hds:
                         dictamen = "RECHAZADO (OOS HDS)"
@@ -206,7 +216,7 @@ with tab_operacion:
                         "Dictamen": dictamen
                     })
 
-                # Guardar mediciones en el histórico para análisis de tendencias
+                # Actualizar Histórico
                 st.session_state.historial_mediciones = pd.concat([
                     st.session_state.historial_mediciones,
                     pd.DataFrame([nuevos_datos_historicos])
@@ -243,7 +253,7 @@ with tab_operacion:
                 except:
                     curva_generada = False
 
-                # Hash de trazabilidad (21 CFR Part 11)
+                # Hash Trazabilidad (21 CFR Part 11)
                 hash_id = hashlib.md5(f"{lote_input}{datetime.now()}".encode()).hexdigest()[:10].upper()
 
                 # Generación del PDF
@@ -281,7 +291,6 @@ with tab_operacion:
                 story.append(t)
                 story.append(Spacer(1, 12))
 
-                # Sección Gráfica
                 if curva_generada:
                     story.append(Paragraph("<b>COMPORTAMIENTO Y CUANTIFICACIÓN GRÁFICA</b>", styles['Heading3']))
                     story.append(Spacer(1, 4))
@@ -326,14 +335,12 @@ with tab_tendencias:
     if df_f.empty:
         st.info("No hay datos históricos suficientes registrados para este producto.")
     else:
-        # Selección de parámetro para graficar
         columnas_params = [c for c in df_f.columns if c not in ["Fecha", "Lote", "Producto"]]
         param_graf = st.selectbox("Seleccione el Parámetro a monitorear:", columnas_params)
 
         fig_spc, ax_spc = plt.subplots(figsize=(8, 3.5), dpi=200)
         ax_spc.plot(df_f["Lote"], df_f[param_graf], marker='o', color='#1E40AF', linewidth=2, label='Valor Medido')
 
-        # Buscar límites para la gráfica
         specs = st.session_state.bd_productos[prod_hist]["especificaciones"]
         spec_actual = next((item for item in specs if item["parametro"] == param_graf), None)
 
@@ -409,5 +416,3 @@ with tab_historial:
                 mime="application/pdf",
                 key=f"hist_{l_id}"
             )
-
-st.markdown('</div>', unsafe_allow_html=True)
