@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 from scipy.stats import linregress
@@ -27,16 +26,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- BLINDAJE ANTI-TRADUCTOR CHROME MÓVIL (EVITA ERROR removeChild / DOM MODIFICATION) ---
-components.html(
+# --- BLINDAJE ANTI-TRADUCTOR CHROME (CSS PURO NATIVO - EVITA ERROR GZipResponder) ---
+st.markdown(
     """
-    <script>
-        window.parent.document.documentElement.setAttribute('lang', 'es');
-        window.parent.document.documentElement.setAttribute('translate', 'no');
-        window.parent.document.body.classList.add('notranslate');
-    </script>
+    <style>
+    /* Desactiva solicitudes de traducción automática en contenedores Streamlit */
+    .stAppViewContainer, .stApp {
+        -webkit-user-select: text;
+        translate: no !important;
+    }
+    </style>
     """,
-    height=0,
+    unsafe_allow_html=True
 )
 
 st.title("🔬 LIMS QC - Control de Calidad & Liberación de Lotes")
