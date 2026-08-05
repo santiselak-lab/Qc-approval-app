@@ -5,4 +5,5 @@ scipy
 matplotlib
 reportlab
 openpyxl
+pypdf
 google-generativeai
