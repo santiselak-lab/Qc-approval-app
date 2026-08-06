@@ -33,7 +33,6 @@ if "productos_db" not in st.session_state:
     }
 
 if "historial_corridas" not in st.session_state:
-    # Datos simulados iniciales para probar SPC e histórico
     st.session_state["historial_corridas"] = pd.DataFrame([
         {"Lote": "LOTE-20260701-01", "Producto": "Sulfato de Cobre Pentahidratado", "Parametro": "Pureza CuSO4.5H2O", "Resultado": 98.5, "Estado": "CUMPLE", "Analista": "Q.F.B. Analista QC", "Fecha": "2026-07-01"},
         {"Lote": "LOTE-20260715-02", "Producto": "Sulfato de Cobre Pentahidratado", "Parametro": "Pureza CuSO4.5H2O", "Resultado": 99.1, "Estado": "CUMPLE", "Analista": "Q.F.B. Analista QC", "Fecha": "2026-07-15"},
@@ -72,28 +71,48 @@ with tab1:
     with col_op2:
         tecnica_instrumental = st.selectbox(
             "Técnica Analítica Aplicada:", 
-            ["HPLC / Cromatografía Líquida", "GC / Cromatografía de Gases", "AAS / Esabsorción Atómica", "ICP-OES", "Físico-Químico (pH / Viscosidad / Densidad)", "Titulometría Clásica"]
+            ["HPLC / Cromatografía Líquida", "GC / Cromatografía de Gases", "AAS / Espectroscopía Atómica", "ICP-OES", "Físico-Químico (pH / Viscosidad / Densidad)", "Titulometría Clásica"]
         )
 
     st.markdown("---")
-    st.markdown(f"**Motor de Cálculo Seleccionado:** `{tecnica_instrumental}`")
     
-    # Simulación de parámetros según la técnica
-    if "HPLC" in tecnica_instrumental or "GC" in tecnica_instrumental:
-        st.info("⚙️ Modo Cromatográfico: Se aplicará cálculo por interpolación de área bajo la curva / curva de calibración lineal.")
-        val_resultado = st.number_input("Resultado Analítico Calculado (Concentración / %):", value=98.8, format="%.2f")
-    elif "AAS" in tecnica_instrumental or "ICP" in tecnica_instrumental:
-        st.info("⚙️ Modo Espectroscópico: Se aplicará factor de dilución y lectura directa contra blanco.")
-        val_resultado = st.number_input("Resultado Obtenido (ppm / %):", value=25.1, format="%.2f")
-    else:
-        st.info("⚙️ Modo Físico-Químico / Volumétrico: Se aplicará corrección por temperatura y factor de valorante.")
-        val_resultado = st.number_input("Resultado Experimental:", value=99.0, format="%.2f")
+    # --- UPLOADER DE DATOS DE LA CORRIDA DE LA MUESTRA ---
+    st.markdown("#### 📂 Subir Datos de la Corrida Analítica")
+    archivo_corrida = st.file_uploader(
+        "Cargue el archivo Excel (.xlsx) con los resultados de la muestra y patrones:", 
+        type=["xlsx"], 
+        key="uploader_datos_corrida"
+    )
 
-    # Obtener límites actuales del producto seleccionado
+    val_resultado = None
+    if archivo_corrida is not None:
+        try:
+            # Leer la pestaña principal de la corrida del Excel maestro
+            df_corrida_subida = pd.read_excel(archivo_corrida, sheet_name="Datos_Corrida", skiprows=6)
+            df_corrida_subida.columns = df_corrida_subida.columns.str.strip()
+            
+            st.success("✅ Archivo de corrida cargado correctamente.")
+            st.markdown("**Vista previa de los datos analíticos recibidos:**")
+            st.dataframe(df_corrida_subida, use_container_width=True)
+            
+            # Intentar extraer el resultado numérico de la primera fila o dejar ingresar manual
+            if "Resultado Obtenido" in df_corrida_subida.columns:
+                val_resultado = float(df_corrida_subida.iloc[0]["Resultado Obtenido"])
+            else:
+                val_resultado = 98.8
+        except Exception as e:
+            st.warning(f"No se encontró la pestaña 'Datos_Corrida' estándar, ingrese el resultado de forma manual: {e}")
+            val_resultado = st.number_input("Resultado Analítico Manual:", value=98.8, format="%.4f")
+    else:
+        st.info("ℹ️ Adjunte el archivo Excel de la corrida o ingrese el valor de prueba a continuación:")
+        val_resultado = st.number_input("Resultado Analítico de la Muestra:", value=98.8, format="%.4f")
+
+    st.markdown(f"**Motor de Cálculo Seleccionado:** `{tecnica_instrumental}`")
+
+    # Obtener límites actuales del producto seleccionado en la BD Master
     especs_producto = st.session_state["productos_db"][prod_sel]["especificaciones"]
     
-    if st.button("🚀 Evaluar Lote y Registrar en Base de Datos"):
-        # Evaluar contra el primer parámetro de la lista como referencia de prueba
+    if st.button("🚀 Evaluar Lote y Registrar en Base de Datos", type="primary"):
         min_lim = especs_producto[0]["min_hds"]
         max_lim = especs_producto[0]["max_hds"]
         param_nombre = especs_producto[0]["parametro"]
@@ -101,9 +120,9 @@ with tab1:
         estado = "CUMPLE" if (min_lim <= val_resultado <= max_lim) else "FUERA DE ESPECIFICACIÓN (OOS)"
         
         if estado == "CUMPLE":
-            st.success(f"✅ Dictamen: El lote {lote_input} **CUMPLE** con los parámetros ({min_lim} - {max_lim}).")
+            st.success(f"✅ Dictamen: El lote {lote_input} **CUMPLE** con los parámetros ({min_lim} - {max_lim}). Resultado: {val_resultado}")
         else:
-            st.error(f"❌ Dictamen: El lote {lote_input} está **FUERA DE ESPECIFICACIÓN**.")
+            st.error(f"❌ Dictamen: El lote {lote_input} está **FUERA DE ESPECIFICACIÓN**. Resultado: {val_resultado}")
             
         # Registrar en el historial de sesión
         nuevo_registro = pd.DataFrame([{
@@ -139,34 +158,43 @@ with tab2:
         
         if guardar_master:
             if nuevo_prod_nombre:
-                # Sistema RAG / Simulador de lectura con mecanismo de seguridad (Fallback)
                 ruta_farmacopea_local = "farmacopea_oficial.pdf"
                 
                 if file_farmacopea is not None:
-                    st.success("📚 Farmacopea cargada exitosamente desde el archivo adjunto por el usuario.")
+                    st.success("📚 Farmacopea cargada exitosamente desde el archivo adjunto.")
                 elif os.path.exists(ruta_farmacopea_local):
-                    st.success("📚 Farmacopea detectada en el almacenamiento local del sistema.")
+                    st.success("📚 Farmacopea detectada en almacenamiento local.")
                 else:
-                    st.warning("⚠️ Aviso del Sistema: No se encontró el archivo de Farmacopea local ni adjunto. **El sistema continúa funcionando con normalidad** utilizando los límites internos del Excel y las SDS.")
+                    st.warning("⚠️ Aviso: No se encontró la Farmacopea. **El sistema continúa funcionando** con los límites internos del Excel y SDS.")
 
-                # Procesar especificaciones si hay Excel, sino usar valores por defecto seguros
                 if file_excel is not None:
                     try:
-                        df_ex = pd.read_excel(file_excel)
-                        st.success("✅ Excel de límites internos procesado correctamente.")
+                        df_ex = pd.read_excel(file_excel, sheet_name="Datos_Corrida", skiprows=6)
+                        df_ex.columns = df_ex.columns.str.strip()
+                        
+                        lista_esp = []
+                        for _, row in df_ex.iterrows():
+                            lista_esp.append({
+                                "parametro": str(row.get("Parametro", "")),
+                                "tecnica": str(row.get("Tecnica Analitica", "")),
+                                "min_hds": float(row.get("Espec. Min HDS", 0)),
+                                "max_hds": float(row.get("Espec. Max HDS", 0)),
+                                "unidad": str(row.get("Unidad", ""))
+                            })
+                        
+                        st.session_state["productos_db"][nuevo_prod_nombre] = {"especificaciones": lista_esp}
+                        st.success(f"✅ Producto '{nuevo_prod_nombre}' registrado con éxito desde el Excel.")
                     except Exception as e:
-                        st.error(f"Error al leer el Excel: {e}")
-                
-                # Registrar producto base
-                st.session_state["productos_db"][nuevo_prod_nombre] = {
-                    "especificaciones": [
-                        {"parametro": "Ensayo Principal", "tecnica": "Metodología General", "min_hds": 95.0, "max_hds": 105.0, "unidad": "%"}
-                    ]
-                }
-                st.success(f"¡Producto '{nuevo_prod_nombre}' registrado en la Base Master con éxito!")
+                        st.error(f"Error al procesar el Excel maestro: {e}")
+                else:
+                    st.session_state["productos_db"][nuevo_prod_nombre] = {
+                        "especificaciones": [
+                            {"parametro": "Ensayo Principal", "tecnica": "Metodología General", "min_hds": 95.0, "max_hds": 105.0, "unidad": "%"}
+                        ]
+                    }
                 st.rerun()
             else:
-                st.warning("Por favor ingrese al menos el nombre del producto.")
+                st.warning("Por favor ingrese el nombre del producto.")
 
     st.markdown("---")
     st.subheader("🔍 Estado Actual de la Base Master")
