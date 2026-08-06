@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------------------------------------------------------
-# INICIALIZACIÓN DEL ESTADO DE SESIÓN
+# INICIALIZACIÓN DEL ESTADO DE SESIÓN (BASE MASTER ROBUSTA)
 # -------------------------------------------------------------------
 if "productos_db" not in st.session_state:
     st.session_state["productos_db"] = {
@@ -41,6 +41,16 @@ if "productos_db" not in st.session_state:
             "especificaciones": [
                 {"parametro": "Pureza CH3COOH", "tecnica": "Titulometria", "min_hds": 99.0, "max_hds": 100.5, "unidad": "%"}
             ]
+        },
+        "Ácido clorhídrico": {
+            "especificaciones": [
+                {"parametro": "Pureza HCl", "tecnica": "Titulometria", "min_hds": 36.0, "max_hds": 38.0, "unidad": "%"}
+            ]
+        },
+        "Hidróxido de sodio en perlas": {
+            "especificaciones": [
+                {"parametro": "Pureza NaOH", "tecnica": "Titulometria", "min_hds": 97.0, "max_hds": 100.5, "unidad": "%"}
+            ]
         }
     }
 
@@ -49,7 +59,8 @@ if "historial_corridas" not in st.session_state:
         {"Lote": "LOTE-20260701-01", "Producto": "Sulfato de Cobre Pentahidratado", "Parametro": "Pureza CuSO4.5H2O", "Resultado": 98.5, "Estado": "CUMPLE", "Analista": "Q.F.B. Analista QC", "JefeQC": "Ing. Químico - Jefe QC", "Fecha": "2026-07-01"},
         {"Lote": "LOTE-20260715-02", "Producto": "Sulfato de Cobre Pentahidratado", "Parametro": "Pureza CuSO4.5H2O", "Resultado": 99.1, "Estado": "CUMPLE", "Analista": "Q.F.B. Analista QC", "JefeQC": "Ing. Químico - Jefe QC", "Fecha": "2026-07-15"},
         {"Lote": "LOTE-20260801-03", "Producto": "Sulfato de Cobre Pentahidratado", "Parametro": "Pureza CuSO4.5H2O", "Resultado": 98.2, "Estado": "CUMPLE", "Analista": "Q.F.B. Analista QC", "JefeQC": "Ing. Químico - Jefe QC", "Fecha": "2026-08-01"},
-        {"Lote": "LOTE-20260806-01", "Producto": "Ácido acético glacial", "Parametro": "Pureza CH3COOH", "Resultado": 99.7, "Estado": "CUMPLE", "Analista": "Q.F.B. Analista QC", "JefeQC": "Ing. Químico - Jefe QC", "Fecha": "2026-08-06"}
+        {"Lote": "LOTE-20260806-01", "Producto": "Ácido acético glacial", "Parametro": "Pureza CH3COOH", "Resultado": 99.7, "Estado": "CUMPLE", "Analista": "Q.F.B. Analista QC", "JefeQC": "Ing. Químico - Jefe QC", "Fecha": "2026-08-06"},
+        {"Lote": "LOTE-20260806-02", "Producto": "Ácido clorhídrico", "Parametro": "Pureza HCl", "Resultado": 37.2, "Estado": "CUMPLE", "Analista": "Q.F.B. Analista QC", "JefeQC": "Ing. Químico - Jefe QC", "Fecha": "2026-08-06"}
     ])
 
 # -------------------------------------------------------------------
@@ -360,9 +371,19 @@ with tab2:
     st.subheader("📦 Configuración Maestra y Repositorio Documental")
     
     with st.form("form_master"):
-        nuevo_prod_nombre = st.text_input("Nombre de Nuevo Producto / Analito:")
+        nuevo_prod_nombre = st.text_input("Nombre de Nuevo Producto / Analito (Ej. Ácido clorhídrico, Acetona, etc.):")
         
-        st.markdown("**1. Cargar Excel de Límites Internos:**")
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            param_ingresado = st.text_input("Nombre del Parámetro (Ej. Pureza HCl):", value="Pureza / Ensayo")
+        with col_m2:
+            min_ingresado = st.number_input("Límite Mínimo Oficial:", value=95.0, format="%.2f")
+        with col_m3:
+            max_ingresado = st.number_input("Límite Máximo Oficial:", value=105.0, format="%.2f")
+
+        unidad_ingresada = st.text_input("Unidad de Medida:", value="%")
+        
+        st.markdown("**1. Cargar Excel de Límites Internos (Opcional):**")
         file_excel = st.file_uploader("Archivo Excel de especificaciones (.xlsx)", type=["xlsx"], key="up_excel")
         
         st.markdown("**2. Cargar Hoja de Seguridad (SDS / MSDS en PDF):**")
@@ -375,12 +396,31 @@ with tab2:
         
         if guardar_master:
             if nuevo_prod_nombre:
+                min_val = min_ingresado
+                max_val = max_ingresado
+                param_val = param_ingresado
+                
+                # Intentar leer límites desde el Excel si se adjuntó
+                if file_excel is not None:
+                    try:
+                        df_spec = pd.read_excel(file_excel)
+                        df_spec.columns = df_spec.columns.astype(str).str.strip().str.lower()
+                        for c in df_spec.columns:
+                            if "min" in c:
+                                min_val = float(df_spec[c].dropna().iloc[0])
+                            elif "max" in c:
+                                max_val = float(df_spec[c].dropna().iloc[0])
+                            elif any(k in c for k in ["param", "ensayo", "analito"]):
+                                param_val = str(df_spec[c].dropna().iloc[0])
+                    except Exception as e:
+                        st.info(f"Se usaron los valores manuales debido a un pequeño detalle leyendo el Excel: {e}")
+
                 st.session_state["productos_db"][nuevo_prod_nombre] = {
                     "especificaciones": [
-                        {"parametro": "Ensayo Principal", "tecnica": "Metodología General", "min_hds": 95.0, "max_hds": 105.0, "unidad": "%"}
+                        {"parametro": param_val, "tecnica": "Metodología Oficial LIMS", "min_hds": min_val, "max_hds": max_val, "unidad": unidad_ingresada}
                     ]
                 }
-                st.success(f"✅ Producto '{nuevo_prod_nombre}' registrado con éxito.")
+                st.success(f"✅ Producto '{nuevo_prod_nombre}' guardado correctamente en la Base Master.")
                 st.rerun()
             else:
                 st.warning("Por favor ingrese el nombre del producto.")
