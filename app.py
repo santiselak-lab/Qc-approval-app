@@ -33,7 +33,7 @@ if "productos_db" not in st.session_state:
     st.session_state["productos_db"] = {
         "Sulfato de Cobre Pentahidratado": {
             "especificaciones": [
-                {"parametro": "Contenido de Cu", "tecnica": "AAS / UV-Vis", "min_hds": 25.0, "max_hds": 25.3, "unidad": "%"},
+                {"parametro": "Contenido de Cu", "tecnica": "AAS / Espectroscopía Atómica", "min_hds": 25.0, "max_hds": 25.3, "unidad": "%"},
                 {"parametro": "Pureza CuSO4.5H2O", "tecnica": "Titulometria", "min_hds": 98.0, "max_hds": 100.5, "unidad": "%"}
             ]
         },
@@ -53,46 +53,56 @@ if "historial_corridas" not in st.session_state:
     ])
 
 # -------------------------------------------------------------------
-# FUNCIÓN PARA GENERAR GRÁFICA MATPLOTLIB PARA EL PDF
+# FUNCIÓN PARA GENERAR GRÁFICA DE CURVA DE CALIBRACIÓN (MATPLOTLIB)
 # -------------------------------------------------------------------
-def generar_imagen_grafica(df_resultados, param_nombre):
-    plt.figure(figsize=(6, 2.5))
-    plt.plot(df_resultados.index + 1, df_resultados["Resultado"], marker='o', color='#1b4f72', linestyle='-', linewidth=2)
-    plt.axhline(y=df_resultados["Resultado"].mean(), color='r', linestyle='--', label=f"Media: {df_resultados['Resultado'].mean():.2f}")
-    plt.title(f"Comportamiento de Replicados - {param_nombre}", fontsize=10, fontweight='bold', color='#1b4f72')
-    plt.xlabel("N° de Replicado / Muestra", fontsize=8)
-    plt.ylabel("Resultado", fontsize=8)
+def generar_imagen_curva_calibracion(x_std, y_std, x_sample, y_sample, slope, intercept, r2, param_nombre):
+    plt.figure(figsize=(6, 2.8))
+    
+    # Puntos de la curva de calibración
+    plt.scatter(x_std, y_std, color='#1b4f72', label='Standards (Calibración)', zorder=5)
+    
+    # Línea de regresión lineal
+    x_line = np.linspace(min(x_std)*0.9, max(x_std)*1.1, 100)
+    y_line = slope * x_line + intercept
+    plt.plot(x_line, y_line, color='#2e4053', linestyle='-', label=f'Regresión: y = {slope:.4f}x + {intercept:.4f}\n$R^2$ = {r2:.4f}')
+    
+    # Punto de corte de la muestra
+    plt.scatter([x_sample], [y_sample], color='#c0392b', s=100, marker='*', label=f'Muestra (X={x_sample:.2f}, Y={y_sample:.2f})', zorder=6)
+    
+    # Líneas de proyección (corte)
+    plt.axvline(x=x_sample, color='#c0392b', linestyle='--', alpha=0.6)
+    plt.axhline(y=y_sample, color='#c0392b', linestyle='--', alpha=0.6)
+    
+    plt.title(f"Curva de Calibración & Interpolación - {param_nombre}", fontsize=9, fontweight='bold', color='#1b4f72')
+    plt.xlabel("Concentración", fontsize=8)
+    plt.ylabel("Señal / Absorbancia", fontsize=8)
     plt.grid(True, linestyle=':', alpha=0.6)
-    plt.legend(fontsize=8)
+    plt.legend(fontsize=7, loc='upper left')
     plt.tight_layout()
     
     img_buffer = io.BytesIO()
     plt.savefig(img_buffer, format='png', dpi=200)
-    plt.buffer_size = img_buffer.seek(0)
+    img_buffer.seek(0)
     plt.close()
     return img_buffer
 
 # -------------------------------------------------------------------
-# FUNCIÓN PARA GENERAR CERTIFICADO PDF OFICIAL CON GRÁFICA Y ESTADÍSTICA
+# FUNCIÓN PARA GENERAR CERTIFICADO PDF OFICIAL CON CURVA DE CALIBRACIÓN
 # -------------------------------------------------------------------
-def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_lim, unidad, estado, analista, jefe_qc, tecnica, stats, img_grafica_bytes):
+def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_lim, unidad, estado, analista, jefe_qc, tecnica, reg_data, img_calib_bytes):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     story = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'TitleStyle', parent=styles['Heading1'], fontSize=15, textColor=colors.HexColor("#1b4f72"), alignment=1, spaceAfter=6
-    )
-    subtitle_style = ParagraphStyle(
-        'SubTitleStyle', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor("#566573"), alignment=1, spaceAfter=15
-    )
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=14, textColor=colors.HexColor("#1b4f72"), alignment=1, spaceAfter=4)
+    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontSize=8.5, textColor=colors.HexColor("#566573"), alignment=1, spaceAfter=10)
     body_style = styles['Normal']
     
     # Encabezado
     story.append(Paragraph("<b>CERTIFICADO DE ANÁLISIS DE CALIDAD (CoA)</b>", title_style))
-    story.append(Paragraph("Sistema LIMS QC Enterprise - Trazabilidad Analítica & Estadística", subtitle_style))
-    story.append(Spacer(1, 5))
+    story.append(Paragraph("Sistema LIMS QC Enterprise - Trazabilidad Analítica & Curva de Calibración", subtitle_style))
+    story.append(Spacer(1, 4))
     
     # Datos Generales
     data_meta = [
@@ -105,16 +115,16 @@ def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_l
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#f2f4f4")),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#bdc3c7"))
     ]))
     story.append(t_meta)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
     
     # Tabla de Resultados
     story.append(Paragraph("<b>1. Evaluación Analítica vs Especificación Oficial</b>", styles['Heading3']))
-    story.append(Spacer(1, 4))
+    story.append(Spacer(1, 3))
     
     color_estado = colors.HexColor("#27ae60") if estado == "CUMPLE" else colors.HexColor("#c0392b")
     
@@ -128,42 +138,42 @@ def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_l
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#bdc3c7")),
         ('TEXTCOLOR', (5,1), (5,1), color_estado),
         ('FONTNAME', (5,1), (5,1), 'Helvetica-Bold')
     ]))
     story.append(t_res)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
     
-    # Análisis Estadístico y Matemático
-    story.append(Paragraph("<b>2. Resumen Estadístico (Matemático) de la Corrida</b>", styles['Heading3']))
-    story.append(Spacer(1, 4))
+    # Modelo Matemático de la Curva de Calibración
+    story.append(Paragraph("<b>2. Modelo Matemático de Regresión & Interpolación de Muestra</b>", styles['Heading3']))
+    story.append(Spacer(1, 3))
     
-    data_stat = [
-        ["Promedio (Media)", "Desviación Estándar (SD)", "Coef. de Variación (%CV)", "Mínimo Replicado", "Máximo Replicado"],
-        [f"{stats['media']:.4f}", f"{stats['sd']:.4f}", f"{stats['cv']:.2f}%", f"{stats['min']:.4f}", f"{stats['max']:.4f}"]
+    data_reg = [
+        ["Ecuación de Recta (y = mx + b)", "Pendiente (m)", "Intercepto (b)", "Coef. Correlación (R²)", "Señal Medida (Y)", "Concentración Interpolada (X)"],
+        [f"y = {reg_data['m']:.4f}x + {reg_data['b']:.4f}", f"{reg_data['m']:.4f}", f"{reg_data['b']:.4f}", f"{reg_data['r2']:.4f}", f"{reg_data['y_sample']:.4f}", f"{resultado:.4f}"]
     ]
-    t_stat = Table(data_stat, colWidths=[110, 110, 110, 100, 110])
-    t_stat.setStyle(TableStyle([
+    t_reg = Table(data_reg, colWidths=[140, 75, 75, 80, 70, 100])
+    t_reg.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5d6d7e")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#bdc3c7"))
     ]))
-    story.append(t_stat)
-    story.append(Spacer(1, 10))
+    story.append(t_reg)
+    story.append(Spacer(1, 8))
     
-    # Gráfica en PDF
-    if img_grafica_bytes:
-        story.append(Paragraph("<b>3. Análisis Gráfico de la Corrida Analítica</b>", styles['Heading3']))
-        story.append(Spacer(1, 4))
-        story.append(RLImage(img_grafica_bytes, width=420, height=175))
-        story.append(Spacer(1, 10))
+    # Gráfica de Curva de Calibración en PDF
+    if img_calib_bytes:
+        story.append(Paragraph("<b>3. Análisis Gráfico: Curva de Calibración y Corte de Muestra</b>", styles['Heading3']))
+        story.append(Spacer(1, 3))
+        story.append(RLImage(img_calib_bytes, width=420, height=185))
+        story.append(Spacer(1, 8))
     
     # Firmas y Trazabilidad
     raw_hash_data = f"{lote}-{producto}-{resultado}-{datetime.now().strftime('%Y%m%d')}"
@@ -176,9 +186,9 @@ def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_l
     t_firmas = Table(data_firmas, colWidths=[270, 270])
     t_firmas.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
     story.append(t_firmas)
-    story.append(Spacer(1, 15))
+    story.append(Spacer(1, 10))
     
-    story.append(Paragraph(f"<b>Trazabilidad 21 CFR Part 11:</b> Hash SHA-256: <code>{hash_seguro}</code>", ParagraphStyle('Hash', parent=body_style, fontSize=7, textColor=colors.HexColor("#7f8c8d"))))
+    story.append(Paragraph(f"<b>Trazabilidad 21 CFR Part 11:</b> Hash SHA-256: <code>{hash_seguro}</code>", ParagraphStyle('Hash', parent=body_style, fontSize=6.5, textColor=colors.HexColor("#7f8c8d"))))
     
     doc.build(story)
     buffer.seek(0)
@@ -188,19 +198,19 @@ def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_l
 # ENCABEZADO PRINCIPAL
 # -------------------------------------------------------------------
 st.title("🧪 LIMS QC & Automatización Analítica")
-st.caption("Control Integrado: Excel Inteligente + Cálculos Estadísticos + Gráficos Automáticos + Reportes PDF")
+st.caption("Control Integrado: Excel Inteligente + Curva de Calibración + Regresión Lineal + Reportes PDF")
 
 tab1, tab2, tab3 = st.tabs([
-    "📋 1. Procesar Corrida & Cálculos", 
+    "📋 1. Procesar Corrida & Calibración", 
     "📦 2. Base Master & Documentación (SDS/Farmacopea)", 
     "📈 3. Historial, SPC & Trazabilidad"
 ])
 
 # -------------------------------------------------------------------
-# PESTAÑA 1: PROCESAR CORRIDA & TÉCNICAS ANALÍTICAS
+# PESTAÑA 1: PROCESAR CORRIDA & CURVA DE CALIBRACIÓN
 # -------------------------------------------------------------------
 with tab1:
-    st.subheader("Evaluación de Lote, Estadísticas, Gráficos y Certificado")
+    st.subheader("Evaluación de Lote, Curva de Calibración, Regresión y Certificado")
     
     lista_productos = list(st.session_state["productos_db"].keys())
     
@@ -218,99 +228,124 @@ with tab1:
     with col_op3:
         tecnica_instrumental = st.selectbox(
             "Técnica Analítica:", 
-            ["HPLC / Cromatografía Líquida", "GC / Cromatografía de Gases", "AAS / Espectroscopía Atómica", "ICP-OES", "Físico-Químico (pH / Viscosidad)", "Titulometría Clásica"]
+            ["AAS / Espectroscopía Atómica", "HPLC / Cromatografía Líquida", "GC / Cromatografía de Gases", "ICP-OES", "Físico-Químico (pH / Viscosidad)", "Titulometria Clásica"]
         )
 
     st.markdown("---")
     
-    # --- UPLOADER INTELIGENTE DE EXCEL ---
-    st.markdown("#### 📂 Cargar Archivo Excel de Resultados de Corrida")
+    # --- UPLOADER INTELIGENTE CON SOPORTE DE CALIBRACIÓN ---
+    st.markdown("#### 📂 Cargar Archivo Excel de Corrida y Calibración")
     archivo_corrida = st.file_uploader(
-        "Sube tu archivo Excel (.xlsx). El sistema detectará automáticamente los títulos y columnas:", 
+        "Sube tu archivo Excel (.xlsx) con los estándares de calibración y la señal de la muestra:", 
         type=["xlsx"], 
         key="uploader_datos_corrida"
     )
 
-    df_cargado_raw = None
-    resultados_serie = pd.Series([98.8]) # Valor por defecto
+    # Datos por defecto para calibración si no se sube archivo (ej: 5 estándares)
+    x_std_default = np.array([0.0, 5.0, 10.0, 15.0, 20.0])
+    y_std_default = np.array([0.02, 1.05, 2.08, 3.12, 4.15])
+    y_sample_input_default = 2.50 # Señal medida de la muestra
+
+    x_std = x_std_default
+    y_std = y_std_default
+    y_sample_val = y_sample_input_default
 
     if archivo_corrida is not None:
         try:
-            # Leer el Excel de manera flexible (primera hoja disponible)
             xls_file = pd.ExcelFile(archivo_corrida)
             sheet_name_to_use = xls_file.sheet_names[0]
             
-            # Buscar si hay alguna hoja con nombre similar a datos o corrida
+            # Buscar pestaña de calibración o datos
             for sh in xls_file.sheet_names:
-                if any(k in sh.lower() for k in ["dato", "corrida", "muestra", "resultado", "analisis"]):
+                if any(k in sh.lower() for k in ["calib", "std", "curva", "dato", "corrida", "muestra"]):
                     sheet_name_to_use = sh
                     break
             
-            df_cargado_raw = pd.read_excel(archivo_corrida, sheet_name=sheet_name_to_use)
+            df_excel = pd.read_excel(archivo_corrida, sheet_name=sheet_name_to_use)
+            df_excel.columns = df_excel.columns.astype(str).str.strip().str.lower()
             
-            # Normalizar nombres de columnas (quitar espacios, convertir a minúsculas)
-            df_cargado_raw.columns = df_cargado_raw.columns.astype(str).str.strip().str.lower()
+            st.success(f"✅ Excel leído desde la pestaña: `{sheet_name_to_use}`")
+            st.dataframe(df_excel, use_container_width=True)
             
-            st.success(f"✅ Excel leído con éxito desde la pestaña: `{sheet_name_to_use}`")
-            st.dataframe(df_cargado_raw, use_container_width=True)
+            # Intentar mapear columnas de estándares (concentración y señal)
+            cols_lower = list(df_excel.columns)
+            col_conc = next((c for c in cols_lower if any(term in c for term in ["conc", "standard", "std", "x"])), None)
+            col_senal = next((c for c in cols_lower if any(term in c for term in ["senal", "absorbancia", "area", "y", "lectura"])), None)
             
-            # Detectar inteligentemente la columna de resultados
-            col_resultado_candidata = None
-            for col in df_cargado_raw.columns:
-                if any(term in col for term in ["resultado", "valor", "concentracion", "lectura", " ensayo", "%", "ppm", "mg"]):
-                    col_resultado_candidata = col
-                    break
+            if col_conc and col_senal:
+                df_clean = df_excel[[col_conc, col_senal]].dropna()
+                x_std = df_clean[col_conc].to_numpy(dtype=float)
+                y_std = df_clean[col_senal].to_numpy(dtype=float)
+                st.info(f"🔍 Estándares de calibración detectados: Concentración (`{col_conc}`) vs Señal (`{col_senal}`).")
             
-            if col_resultado_candidata is not None:
-                resultados_serie = pd.to_numeric(df_cargado_raw[col_resultado_candidata], errors='coerce').dropna()
-                st.info(f"🔍 Columna de resultados detectada automáticamente: `{col_resultado_candidata}` ({len(resultados_serie)} valores encontrados).")
-            else:
-                # Si no encuentra ninguna, tomar la primera columna numérica que encuentre
-                for col in df_cargado_raw.columns:
-                    if pd.api.types.is_numeric_dtype(df_cargado_raw[col]):
-                        resultados_serie = df_cargado_raw[col].dropna()
-                        st.info(f"ℹ️ Usando la primera columna numérica detectada: `{col}`")
-                        break
-                        
+            # Intentar detectar valor de la muestra
+            col_muestra_val = next((c for c in cols_lower if any(term in c for term in ["muestra", "sample", "resultado", "valor"])), None)
+            if col_muestra_val:
+                y_sample_val = float(df_excel[col_muestra_val].dropna().iloc[0])
+                st.info(f"🔍 Señal / Valor de muestra detectado en columna `{col_muestra_val}`: {y_sample_val}")
+                
         except Exception as e:
-            st.error(f"Error al procesar el archivo Excel: {e}")
-            resultados_serie = pd.Series([98.8])
+            st.warning(f"No se pudieron extraer automáticamente los estándares: {e}. Usando valores interactivos.")
+
+    st.markdown("---")
+    st.markdown("#### 🎛️ Parámetros de la Curva de Calibración & Señal de Muestra")
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        st.write("Valores de Estándares Activos (Concentración / Señal):")
+        df_std_edit = pd.DataFrame({"Concentración (X)": x_std, "Señal / Absorbancia (Y)": y_std})
+        df_std_edited = st.data_editor(df_std_edit, num_rows="dynamic", key="editor_std")
+        x_std = df_std_edited["Concentración (X)"].to_numpy(dtype=float)
+        y_std = df_std_edited["Señal / Absorbancia (Y)"].to_numpy(dtype=float)
+        
+    with col_c2:
+        st.write("Lectura Instrumental de la Muestra:")
+        y_sample_val = st.number_input("Señal / Absorbancia Medida en la Muestra (Y):", value=float(y_sample_val), format="%.4f")
+
+    # --- CÁLCULO MATEMÁTICO DE REGRESIÓN LINEAL ---
+    if len(x_std) > 1 and len(y_std) > 1:
+        slope, intercept = np.polyfit(x_std, y_std, 1)
+        correlation_matrix = np.corrcoef(x_std, y_std)
+        r_val = correlation_matrix[0, 1] if not np.isnan(correlation_matrix[0, 1]) else 0.0
+        r2 = r_val ** 2
+        
+        # Cálculo matemático del corte (Interpolación de la muestra: X = (Y - b) / m)
+        if slope != 0:
+            val_resultado = (y_sample_val - intercept) / slope
+        else:
+            val_resultado = 0.0
     else:
-        st.info("ℹ️ Sin archivo adjunto. Se usará el valor manual de prueba a continuación:")
-        val_manual = st.number_input("Valor Analítico Manual:", value=98.8, format="%.4f")
-        resultados_serie = pd.Series([val_manual])
+        slope, intercept, r2 = 1.0, 0.0, 1.0
+        val_resultado = y_sample_val
 
-    # Valor principal a reportar (promedio de la serie cargada o valor único)
-    val_resultado = float(resultados_serie.mean()) if not resultados_serie.empty else 98.8
-
-    # Cálculo Estadístico Matemático de los datos cargados
-    stats_corrida = {
-        "media": float(resultados_serie.mean()),
-        "sd": float(resultados_serie.std(ddof=1)) if len(resultados_serie) > 1 else 0.0,
-        "cv": float((resultados_serie.std(ddof=1) / resultados_serie.mean()) * 100) if len(resultados_serie) > 1 and resultados_serie.mean() != 0 else 0.0,
-        "min": float(resultados_serie.min()),
-        "max": float(resultados_serie.max())
+    reg_data = {
+        "m": slope,
+        "b": intercept,
+        "r2": r2,
+        "y_sample": y_sample_val
     }
 
-    # Mostrar Métricas Estadísticas en Pantalla
-    st.markdown("### 📊 Análisis Estadístico y Matemático en Vivo")
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Promedio", f"{stats_corrida['media']:.4f}")
-    m2.metric("Desv. Estándar (SD)", f"{stats_corrida['sd']:.4f}")
-    m3.metric("% Coef. Variación", f"{stats_corrida['cv']:.2f}%")
-    m4.metric("Valor Mínimo", f"{stats_corrida['min']:.4f}")
-    m5.metric("Valor Máximo", f"{stats_corrida['max']:.4f}")
+    # Mostrar Resultados Matemáticos en Pantalla
+    st.markdown("### 📊 Modelo Matemático de Regresión Lineal")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Ecuación de Recta", f"y = {slope:.4f}x + {intercept:.4f}")
+    m2.metric("Coeficiente R²", f"{r2:.4f}")
+    m3.metric("Señal de Muestra (Y)", f"{y_sample_val:.4f}")
+    m4.metric("Concentración Calculada (X)", f"{val_resultado:.4f}")
 
     # Gráfica Interactiva en Streamlit (Plotly)
-    if len(resultados_serie) > 0:
-        df_plot = pd.DataFrame({"Replicado": range(1, len(resultados_serie) + 1), "Resultado": resultados_serie.values})
-        fig_interactiva = px.line(
-            df_plot, x="Replicado", y="Resultado", markers=True,
-            title="Tendencia Gráfica de Replicados de la Muestra",
-            labels={"Resultado": "Valor Medido", "Replicado": "N° de Muestra"}
-        )
-        fig_interactiva.add_hline(y=stats_corrida['media'], line_dash="dash", line_color="red", annotation_text=f"Media: {stats_corrida['media']:.2f}")
-        st.plotly_chart(fig_interactiva, use_container_width=True)
+    fig_calib = px.scatter(
+        x=x_std, y=y_std, labels={"x": "Concentración", "y": "Señal / Absorbancia"},
+        title="Curva de Calibración & Corte de Interpolación de la Muestra"
+    )
+    # Agregar línea de regresión
+    x_range = np.linspace(min(x_std) if len(x_std)>0 else 0, max(x_std) if len(x_std)>0 else 10, 100)
+    y_range = slope * x_range + intercept
+    fig_calib.add_scatter(x=x_range, y=y_range, mode='lines', name=f"Regresión (R²={r2:.4f})")
+    # Agregar punto de la muestra
+    fig_calib.add_scatter(x=[val_resultado], y=[y_sample_val], mode='markers+text', 
+                          marker=dict(color='red', size=14, symbol='star'),
+                          text=[f"Muestra: {val_resultado:.2f}"], textposition="top center", name="Muestra Problema")
+    st.plotly_chart(fig_calib, use_container_width=True)
 
     # Obtener especificaciones del producto seleccionado
     especs_producto = st.session_state["productos_db"][prod_sel]["especificaciones"]
@@ -322,13 +357,13 @@ with tab1:
 
     st.markdown(f"**Parámetro evaluado en base master:** `{param_nombre}` (Límites permitidos: {min_lim} - {max_lim} {unidad_medida})")
 
-    if st.button("🚀 Evaluar Lote, Registrar y Generar Certificado PDF Completo", type="primary"):
+    if st.button("🚀 Evaluar Lote, Registrar y Generar Certificado PDF con Curva", type="primary"):
         estado = "CUMPLE" if (min_lim <= val_resultado <= max_lim) else "FUERA DE ESPECIFICACIÓN (OOS)"
         
         if estado == "CUMPLE":
-            st.success(f"✅ Dictamen: El lote {lote_input} **CUMPLE** con los parámetros. Resultado Promedio: {val_resultado:.4f} {unidad_medida}")
+            st.success(f"✅ Dictamen: El lote {lote_input} **CUMPLE**. Concentración Interpolada: {val_resultado:.4f} {unidad_medida}")
         else:
-            st.error(f"❌ Dictamen: El lote {lote_input} está **FUERA DE ESPECIFICACIÓN**. Resultado Promedio: {val_resultado:.4f} {unidad_medida}")
+            st.error(f"❌ Dictamen: El lote {lote_input} está **FUERA DE ESPECIFICACIÓN**. Concentración Interpolada: {val_resultado:.4f} {unidad_medida}")
             
         # Registrar en el historial de sesión
         nuevo_registro = pd.DataFrame([{
@@ -343,10 +378,10 @@ with tab1:
         }])
         st.session_state["historial_corridas"] = pd.concat([st.session_state["historial_corridas"], nuevo_registro], ignore_index=True)
 
-        # Generar imagen gráfica en buffer para el PDF
-        img_buf = generar_imagen_grafica(df_plot, param_nombre) if len(resultados_serie) > 0 else None
+        # Generar imagen gráfica de calibración en buffer para el PDF
+        img_buf = generar_imagen_curva_calibracion(x_std, y_std, val_resultado, y_sample_val, slope, intercept, r2, param_nombre)
 
-        # Generar PDF oficial con estadísticas y gráficos incrustados
+        # Generar PDF oficial con Curva de Calibración incrustada
         pdf_bytes = generar_pdf_certificado(
             lote=lote_input,
             producto=prod_sel,
@@ -359,13 +394,13 @@ with tab1:
             analista=analista_input,
             jefe_qc=jefe_qc_input,
             tecnica=tecnica_instrumental,
-            stats=stats_corrida,
-            img_grafica_bytes=img_buf
+            reg_data=reg_data,
+            img_calib_bytes=img_buf
         )
 
-        st.markdown("### 📥 Descargar Certificado de Análisis con Análisis Gráfico y Estadístico")
+        st.markdown("### 📥 Descargar Certificado de Análisis con Curva de Calibración")
         st.download_button(
-            label="📄 Descargar Certificado PDF Oficial",
+            label="📄 Descargar Certificado PDF Oficial con Curva",
             data=pdf_bytes,
             file_name=f"CoA_{lote_input}_{prod_sel.replace(' ', '_')}.pdf",
             mime="application/pdf"
@@ -393,24 +428,12 @@ with tab2:
         
         if guardar_master:
             if nuevo_prod_nombre:
-                if file_excel is not None:
-                    try:
-                        df_ex = pd.read_excel(file_excel)
-                        df_ex.columns = df_ex.columns.str.strip().str.lower()
-                        st.session_state["productos_db"][nuevo_prod_nombre] = {
-                            "especificaciones": [
-                                {"parametro": "Ensayo Principal", "tecnica": "Metodología General", "min_hds": 95.0, "max_hds": 105.0, "unidad": "%"}
-                            ]
-                        }
-                        st.success(f"✅ Producto '{nuevo_prod_nombre}' registrado con éxito.")
-                    except Exception as e:
-                        st.error(f"Error procesando Excel maestro: {e}")
-                else:
-                    st.session_state["productos_db"][nuevo_prod_nombre] = {
-                        "especificaciones": [
-                            {"parametro": "Ensayo Principal", "tecnica": "Metodología General", "min_hds": 95.0, "max_hds": 105.0, "unidad": "%"}
-                        ]
-                    }
+                st.session_state["productos_db"][nuevo_prod_nombre] = {
+                    "especificaciones": [
+                        {"parametro": "Ensayo Principal", "tecnica": "Metodología General", "min_hds": 95.0, "max_hds": 105.0, "unidad": "%"}
+                    ]
+                }
+                st.success(f"✅ Producto '{nuevo_prod_nombre}' registrado con éxito.")
                 st.rerun()
             else:
                 st.warning("Por favor ingrese el nombre del producto.")
