@@ -93,6 +93,10 @@ def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_l
     subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontSize=8.5, textColor=colors.HexColor("#566573"), alignment=1, spaceAfter=10)
     body_style = styles['Normal']
     
+    th_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontSize=7.5, textColor=colors.white, fontName='Helvetica-Bold', alignment=1)
+    tc_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=7.5, alignment=1)
+    tc_left_style = ParagraphStyle('TableCellLeft', parent=styles['Normal'], fontSize=7.5, alignment=0)
+    
     story.append(Paragraph("<b>CERTIFICADO DE ANÁLISIS DE CALIDAD (CoA)</b>", title_style))
     story.append(Paragraph("Sistema LIMS QC Enterprise - Trazabilidad Analítica & Curva de Calibración", subtitle_style))
     story.append(Spacer(1, 4))
@@ -117,23 +121,21 @@ def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_l
     story.append(Paragraph("<b>1. Evaluación Analítica vs Especificación Oficial</b>", styles['Heading3']))
     story.append(Spacer(1, 3))
     
-    color_estado = colors.HexColor("#27ae60") if estado == "CUMPLE" else colors.HexColor("#c0392b")
+    color_hex = "#27ae60" if estado == "CUMPLE" else "#c0392b"
+    dictamen_style = ParagraphStyle('DictamenStyle', parent=styles['Normal'], fontSize=7.5, textColor=colors.HexColor(color_hex), fontName='Helvetica-Bold', alignment=1)
     
     data_res = [
-        ["Parámetro Evaluado", "Espec. Min", "Espec. Max", "Resultado", "Unidad", "Dictamen"],
-        [parametro, f"{min_lim}", f"{max_lim}", f"{resultado:.4f}", unidad, estado]
+        [Paragraph("Parámetro Evaluado", th_style), Paragraph("Espec. Min", th_style), Paragraph("Espec. Max", th_style), Paragraph("Resultado", th_style), Paragraph("Unidad", th_style), Paragraph("Dictamen", th_style)],
+        [Paragraph(parametro, tc_left_style), Paragraph(str(min_lim), tc_style), Paragraph(str(max_lim), tc_style), Paragraph(f"{resultado:.4f}", tc_style), Paragraph(unidad, tc_style), Paragraph(estado, dictamen_style)]
     ]
-    t_res = Table(data_res, colWidths=[140, 80, 80, 80, 50, 110])
+    t_res = Table(data_res, colWidths=[130, 55, 55, 75, 45, 192])
     t_res.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2e4053")),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('BOTTOMPADDING', (0,0), (-1,-1), 5),
         ('TOPPADDING', (0,0), (-1,-1), 5),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#bdc3c7")),
-        ('TEXTCOLOR', (5,1), (5,1), color_estado),
-        ('FONTNAME', (5,1), (5,1), 'Helvetica-Bold')
     ]))
     story.append(t_res)
     story.append(Spacer(1, 8))
@@ -142,15 +144,14 @@ def generar_pdf_certificado(lote, producto, parametro, resultado, min_lim, max_l
     story.append(Spacer(1, 3))
     
     data_reg = [
-        ["Ecuación de Recta (y = mx + b)", "Pendiente (m)", "Intercepto (b)", "Coef. Correlación (R²)", "Señal Medida (Y)", "Concentración Interpolada (X)"],
-        [f"y = {reg_data['m']:.4f}x + {reg_data['b']:.4f}", f"{reg_data['m']:.4f}", f"{reg_data['b']:.4f}", f"{reg_data['r2']:.4f}", f"{reg_data['y_sample']:.4f}", f"{resultado:.4f}"]
+        [Paragraph("Ecuación de Recta (y = mx + b)", th_style), Paragraph("Pendiente (m)", th_style), Paragraph("Intercepto (b)", th_style), Paragraph("Coef. Correlación (R²)", th_style), Paragraph("Señal Medida (Y)", th_style), Paragraph("Concentración Interpolada (X)", th_style)],
+        [Paragraph(f"y = {reg_data['m']:.4f}x + {reg_data['b']:.4f}", tc_style), Paragraph(f"{reg_data['m']:.4f}", tc_style), Paragraph(f"{reg_data['b']:.4f}", tc_style), Paragraph(f"{reg_data['r2']:.4f}", tc_style), Paragraph(f"{reg_data['y_sample']:.4f}", tc_style), Paragraph(f"{resultado:.4f}", tc_style)]
     ]
-    t_reg = Table(data_reg, colWidths=[140, 75, 75, 80, 70, 100])
+    t_reg = Table(data_reg, colWidths=[120, 65, 65, 95, 80, 127])
     t_reg.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5d6d7e")),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('BOTTOMPADDING', (0,0), (-1,-1), 4),
         ('TOPPADDING', (0,0), (-1,-1), 4),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#bdc3c7"))
@@ -267,7 +268,6 @@ with tab1:
         except Exception as e:
             st.warning(f"No se pudieron extraer automáticamente los estándares: {e}. Usando valores por defecto.")
 
-    # Ocultar la tabla de edición y los inputs en un expander para no ensuciar la pantalla móvil
     with st.expander("⚙️ Ajustes Avanzados: Ver / Editar Estándares de Calibración & Señal de Muestra Manual", expanded=False):
         col_c1, col_c2 = st.columns(2)
         with col_c1:
@@ -281,7 +281,6 @@ with tab1:
             st.write("Lectura Instrumental de la Muestra:")
             y_sample_val = st.number_input("Señal / Absorbancia Medida en la Muestra (Y):", value=float(y_sample_val), format="%.4f")
 
-    # Obtener especificaciones del producto seleccionado
     especs_producto = st.session_state["productos_db"][prod_sel]["especificaciones"]
     param_obj = especs_producto[0]
     min_lim = param_obj["min_hds"]
@@ -292,7 +291,6 @@ with tab1:
     st.markdown(f"**Parámetro evaluado en base master:** `{param_nombre}` (Límites permitidos: {min_lim} - {max_lim} {unidad_medida})")
 
     if st.button("🚀 Evaluar Lote, Registrar y Generar Certificado PDF con Curva", type="primary"):
-        # Cálculo matemático interno al presionar el botón
         if len(x_std) > 1 and len(y_std) > 1:
             slope, intercept = np.polyfit(x_std, y_std, 1)
             correlation_matrix = np.corrcoef(x_std, y_std)
