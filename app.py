@@ -267,19 +267,19 @@ with tab1:
         except Exception as e:
             st.warning(f"No se pudieron extraer automáticamente los estándares: {e}. Usando valores por defecto.")
 
-    st.markdown("---")
-    st.markdown("#### 🎛️ Parámetros de la Curva de Calibración & Señal de Muestra")
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        st.write("Valores de Estándares Activos:")
-        df_std_edit = pd.DataFrame({"Concentración (X)": x_std, "Señal / Absorbancia (Y)": y_std})
-        df_std_edited = st.data_editor(df_std_edit, num_rows="dynamic", key="editor_std")
-        x_std = df_std_edited["Concentración (X)"].to_numpy(dtype=float)
-        y_std = df_std_edited["Señal / Absorbancia (Y)"].to_numpy(dtype=float)
-        
-    with col_c2:
-        st.write("Lectura Instrumental de la Muestra:")
-        y_sample_val = st.number_input("Señal / Absorbancia Medida en la Muestra (Y):", value=float(y_sample_val), format="%.4f")
+    # Ocultar la tabla de edición y los inputs en un expander para no ensuciar la pantalla móvil
+    with st.expander("⚙️ Ajustes Avanzados: Ver / Editar Estándares de Calibración & Señal de Muestra Manual", expanded=False):
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.write("Valores de Estándares Activos:")
+            df_std_edit = pd.DataFrame({"Concentración (X)": x_std, "Señal / Absorbancia (Y)": y_std})
+            df_std_edited = st.data_editor(df_std_edit, num_rows="dynamic", key="editor_std")
+            x_std = df_std_edited["Concentración (X)"].to_numpy(dtype=float)
+            y_std = df_std_edited["Señal / Absorbancia (Y)"].to_numpy(dtype=float)
+            
+        with col_c2:
+            st.write("Lectura Instrumental de la Muestra:")
+            y_sample_val = st.number_input("Señal / Absorbancia Medida en la Muestra (Y):", value=float(y_sample_val), format="%.4f")
 
     # Obtener especificaciones del producto seleccionado
     especs_producto = st.session_state["productos_db"][prod_sel]["especificaciones"]
